@@ -1,0 +1,14 @@
+{
+  "name": "Reservar - Taracea",
+  "short_name": "Taracea",
+  "description": "Reserva tu mesa en Taracea",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#151310",
+  "theme_color": "#151310",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

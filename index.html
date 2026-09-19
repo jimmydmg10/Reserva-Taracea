@@ -12,6 +12,11 @@
   #root { min-height: 100vh; }
   #boot-error { display:none; font-family: system-ui, sans-serif; color:#F2EDE6; background:#2A1616; border:1px solid #6B3A32; border-radius:10px; padding:20px; margin:24px; white-space:pre-wrap; line-height:1.5; }
 </style>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-512.png" type="image/png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 </head>
 <body>
 <div id="root"></div>
@@ -1783,6 +1788,13 @@ if (typeof React === "undefined" || typeof ReactDOM === "undefined") {
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(React.createElement(App));
 }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch((err) => console.error("SW error:", err));
+    });
+  }
 </script>
 </body>
 </html>
