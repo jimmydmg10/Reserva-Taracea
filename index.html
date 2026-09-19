@@ -938,13 +938,14 @@ function AdminFloorEditor({ tables, setTables, reservations }) {
   const [selectedDate] = useState(todayISO());
   const svgRef = React.useRef(null);
   const areaTables = useMemo(() => tables.filter((t) => t.area === area), [tables, area]);
-  const viewBox = useMemo(() => {
-    if (areaTables.length === 0) return "0 0 1000 700";
+  const floorDims = useMemo(() => {
+    if (areaTables.length === 0) return { w: 1e3, h: 700 };
     const centers = areaTables.map(tableCenter);
     const maxX = Math.max(...centers.map((c) => c.x)) + 180;
     const maxY = Math.max(...centers.map((c) => c.y)) + 130;
-    return `0 0 ${maxX} ${maxY}`;
+    return { w: maxX, h: maxY };
   }, [areaTables]);
+  const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   const toSvgPoint = (clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -981,8 +982,9 @@ function AdminFloorEditor({ tables, setTables, reservations }) {
     {
       ref: svgRef,
       viewBox,
+      width: floorDims.w,
+      height: floorDims.h,
       style: { ...styles.floorSvg, touchAction: draggingId ? "none" : "auto" },
-      preserveAspectRatio: "xMidYMid meet",
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp,
       onPointerLeave: handlePointerUp
@@ -1027,6 +1029,13 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
   }, [reservations, slot, date, selectedRes]);
   const freeTables = tables.filter((t) => !occupiedElsewhere.has(t.id));
   const areaTables = tables.filter((t) => t.area === area);
+  const floorDims = useMemo(() => {
+    if (areaTables.length === 0) return { w: 1e3, h: 700 };
+    const centers = areaTables.map(tableCenter);
+    const maxX = Math.max(...centers.map((c) => c.x)) + 180;
+    const maxY = Math.max(...centers.map((c) => c.y)) + 130;
+    return { w: maxX, h: maxY };
+  }, [areaTables]);
   const destCapacity = destTables.reduce((sum, id) => {
     var _a;
     return sum + (((_a = tables.find((t) => t.id === id)) == null ? void 0 : _a.capacity) || 0);
@@ -1075,15 +1084,10 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
   }, style: { ...styles.slotChip, ...s === slot ? styles.slotChipActive : {} } }, s)))))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), selectedRes && /* @__PURE__ */ React.createElement("span", { style: styles.editHint }, "Toca las mesas para a\xF1adirlas o quitarlas del destino")), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
     "svg",
     {
-      viewBox: (() => {
-        if (areaTables.length === 0) return "0 0 1000 700";
-        const centers = areaTables.map(tableCenter);
-        const maxX = Math.max(...centers.map((c) => c.x)) + 180;
-        const maxY = Math.max(...centers.map((c) => c.y)) + 130;
-        return `0 0 ${maxX} ${maxY}`;
-      })(),
-      style: styles.floorSvg,
-      preserveAspectRatio: "xMidYMid meet"
+      viewBox: `0 0 ${floorDims.w} ${floorDims.h}`,
+      width: floorDims.w,
+      height: floorDims.h,
+      style: styles.floorSvg
     },
     areaTables.map((t) => {
       const isFree = freeTables.some((f) => f.id === t.id);
@@ -1276,13 +1280,14 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       setTimeout(() => setManualMsg(""), 3e3);
     }
   };
-  const viewBox = useMemo(() => {
-    if (areaTables.length === 0) return "0 0 1000 700";
+  const floorDims = useMemo(() => {
+    if (areaTables.length === 0) return { w: 1e3, h: 700 };
     const centers = areaTables.map(tableCenter);
     const maxX = Math.max(...centers.map((c) => c.x)) + 180;
     const maxY = Math.max(...centers.map((c) => c.y)) + 130;
-    return `0 0 ${maxX} ${maxY}`;
+    return { w: maxX, h: maxY };
   }, [areaTables]);
+  const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1355,8 +1360,9 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     "svg",
     {
       viewBox,
-      style: styles.floorSvg,
-      preserveAspectRatio: "xMidYMid meet"
+      width: floorDims.w,
+      height: floorDims.h,
+      style: styles.floorSvg
     },
     slotReservations.filter((r) => r.tableIds.length > 1).flatMap((r) => {
       const lines = [];
@@ -1736,8 +1742,8 @@ const styles = {
   floorWrap: { flex: 2, background: "#1B1916", border: "1px solid #2A2822", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column" },
   floorHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
   floorHeaderText: { fontSize: 13, color: "#9C9488" },
-  floor: { position: "relative", flex: 1, minHeight: 480, background: "#151310", borderRadius: 10, overflow: "hidden", userSelect: "none" },
-  floorSvg: { width: "100%", height: "100%", display: "block" },
+  floor: { position: "relative", flex: 1, minHeight: 480, background: "#151310", borderRadius: 10, overflow: "auto", userSelect: "none", WebkitOverflowScrolling: "touch" },
+  floorSvg: { display: "block", maxWidth: "none" },
   legend: { display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" },
   legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#9C9488" },
   dot: { width: 10, height: 10, borderRadius: 3, display: "inline-block" },
