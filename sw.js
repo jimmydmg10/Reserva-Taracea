@@ -1,4 +1,4 @@
-const CACHE_NAME = "taracea-v1";
+const CACHE_NAME = "taracea-interna-v2";
 const urlsToCache = ["./", "./index.html"];
 
 self.addEventListener("install", (event) => {
@@ -18,8 +18,19 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  // Solo cacheamos peticiones GET del propio sitio; todo lo demás (Supabase, etc.) va directo a la red
   if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const networkFetch = fetch(event.request)
