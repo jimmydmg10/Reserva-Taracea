@@ -272,6 +272,7 @@ function todayISO() {
 function isActiveRes(r) {
   return !r.estado || r.estado === "activa";
 }
+const NEVER_STANDALONE = /* @__PURE__ */ new Set(["Suplemento"]);
 const HEAD_BONUS_GROUPS = [
   /* @__PURE__ */ new Set(["S1", "S2", "S3", "S4"]),
   /* @__PURE__ */ new Set(["S5", "S6", "S7", "S8"]),
@@ -288,7 +289,7 @@ function findBestFit(tables, reservations, date, slot, partySize, area) {
   const isFree = (id) => !reservations.some((r) => isActiveRes(r) && r.date === date && r.tableIds.includes(id));
   const freeTables = tables.filter((t) => isFree(t.id) && t.area === area);
   const byId = Object.fromEntries(tables.map((t) => [t.id, t]));
-  const singleFit = freeTables.filter((t) => t.capacity >= partySize).sort((a, b) => a.capacity - b.capacity)[0];
+  const singleFit = freeTables.filter((t) => t.capacity >= partySize && !NEVER_STANDALONE.has(t.id)).sort((a, b) => a.capacity - b.capacity)[0];
   if (singleFit) return { tableIds: [singleFit.id], totalCapacity: singleFit.capacity };
   const combos = connectedCombos(freeTables, 5).map((ids) => {
     const sorted = ids.sort();
