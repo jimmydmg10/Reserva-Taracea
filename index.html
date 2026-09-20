@@ -32,7 +32,7 @@
 </script>
 <script>
 const { useState, useMemo, useEffect, useRef } = React;
-const PUBLIC_MODE = true;
+const PUBLIC_MODE = false;
 const SUPABASE_URL = "https://woqjcdldjmkpmjemnyyh.supabase.co";
 const SUPABASE_KEY = "sb_publishable_wU0yK-S0n21SX_7s0ByXQQ_4IlxouDP";
 function mapReserva(r) {
@@ -46,7 +46,8 @@ function mapReserva(r) {
     tableIds: r.mesa_ids,
     arrivedAt: r.llegada,
     estado: r.estado || "activa",
-    cancelReason: r.motivo_cancelacion
+    cancelReason: r.motivo_cancelacion,
+    createdAt: r.creada_en
   };
 }
 async function sb(path, options = {}) {
@@ -503,7 +504,7 @@ function App() {
     };
   }, []);
   const availableAreas = ["Sala", "Terraza"].filter((a) => zoneSettings[a]);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", partySize: 2, date: todayISO(), slot: "20:00", area: "Sala" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", partySize: 2, date: todayISO(), slot: "20:00", area: "Sala", website: "" });
   const [pendingSuggestion, setPendingSuggestion] = useState(null);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(null);
@@ -549,9 +550,19 @@ function App() {
   const handleCheckAvailability = () => {
     setError("");
     setConfirmed(null);
+    if (form.website && form.website.trim()) return;
     if (!form.name.trim()) {
       setError("Necesitamos un nombre para la reserva.");
       return;
+    }
+    if (form.phone && form.phone.trim()) {
+      const recientes = reservations.filter(
+        (r) => r.phone && r.phone.trim() === form.phone.trim() && r.createdAt && Date.now() - new Date(r.createdAt).getTime() < 10 * 60 * 1e3
+      ).length;
+      if (recientes >= 3) {
+        setError("Demasiadas reservas seguidas con este tel\xE9fono. Espera unos minutos e int\xE9ntalo de nuevo.");
+        return;
+      }
     }
     const fit = findBestFit(tables, reservations, form.date, form.slot, Number(form.partySize), form.area);
     if (!fit) {
@@ -562,6 +573,7 @@ function App() {
     setPendingSuggestion(fit);
   };
   const handleConfirm = async () => {
+    if (form.website && form.website.trim()) return;
     setSaving(true);
     const payload = {
       nombre: form.name,
@@ -586,7 +598,7 @@ function App() {
     } finally {
       setSaving(false);
       setPendingSuggestion(null);
-      setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area });
+      setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area, website: "" });
     }
   };
   const slotReservations = useMemo(
@@ -681,7 +693,8 @@ function App() {
       tables,
       setTables,
       reservations,
-      setReservations
+      setReservations,
+      clients
     }
   ), /* @__PURE__ */ React.createElement("footer", { style: styles.footer }, /* @__PURE__ */ React.createElement("span", null, "AKTEC Manager")));
 }
@@ -696,7 +709,19 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
   if (confirmed) {
     return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmIcon }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u2713")), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, "Reserva confirmada"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, confirmed.name, ", tu mesa para ", confirmed.partySize, " personas a las ", confirmed.slot, " est\xE1 lista."), /* @__PURE__ */ React.createElement("p", { style: styles.confirmMeta }, "Mesa", confirmed.tableIds.length > 1 ? "s" : "", " asignada", confirmed.tableIds.length > 1 ? "s" : "", ": ", confirmed.tableIds.join(" + "), " \xB7 ", confirmed.area)));
   }
-  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Reserva tu mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "El sistema asigna o combina mesas autom\xE1ticamente seg\xFAn el grupo."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F4C5}"), "D\xEDa"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Reserva tu mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "El sistema asigna o combina mesas autom\xE1ticamente seg\xFAn el grupo."), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      name: "website",
+      value: form.website,
+      onChange: (e) => setForm({ ...form, website: e.target.value }),
+      style: styles.honeypot,
+      tabIndex: -1,
+      autoComplete: "off",
+      "aria-hidden": "true"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F4C5}"), "D\xEDa"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "date",
@@ -818,7 +843,7 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
 }
 const ADMIN_PASSWORD = "taracea2026";
-function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, tables, setTables, reservations, setReservations }) {
+function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, tables, setTables, reservations, setReservations, clients }) {
   const [unlocked, setUnlocked] = useState(false);
   const [pass, setPass] = useState("");
   const [wrongPass, setWrongPass] = useState(false);
@@ -853,7 +878,8 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
     { id: "plano", label: "Editar plano" },
     { id: "mover", label: "Mover reserva" },
     { id: "crear", label: "Crear mesa" },
-    { id: "informes", label: "Informes" }
+    { id: "informes", label: "Informes" },
+    { id: "clientes", label: "Clientes" }
   ].map((t) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -862,7 +888,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "mover" && /* @__PURE__ */ React.createElement(AdminMoveReservation, { tables, reservations, setReservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "mover" && /* @__PURE__ */ React.createElement(AdminMoveReservation, { tables, reservations, setReservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -882,6 +908,55 @@ function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleRese
   )), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 10 } }, "Con esto activado, cualquiera que intente reservar en esta web ver\xE1 un aviso de que no hay espacio disponible online, con el tel\xE9fono de reservas. Solo afecta a esta aplicaci\xF3n \u2014 no a tu TPV, tel\xE9fono u otras plataformas."), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 20 } }, "Al cerrar una zona, los clientes solo ver\xE1n la otra opci\xF3n en el formulario de reserva. Las mesas y reservas ya existentes de esa zona no se borran, solo se oculta para nuevas reservas.")));
 }
 const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Mi\xE9rcoles", "Jueves", "Viernes", "S\xE1bado"];
+function AdminClientStats({ reservations, clients }) {
+  const validReservations = useMemo(
+    () => reservations.filter((r) => r.estado === "activa" || r.estado === "finalizada"),
+    [reservations]
+  );
+  const topClients = useMemo(() => {
+    const byPhone = {};
+    validReservations.forEach((r) => {
+      if (!r.phone || !r.phone.trim()) return;
+      const phone = r.phone.trim();
+      if (!byPhone[phone]) byPhone[phone] = { phone, name: r.name, visits: 0, people: 0, lastDate: r.date };
+      byPhone[phone].visits += 1;
+      byPhone[phone].people += r.partySize;
+      byPhone[phone].name = r.name;
+      if (r.date > byPhone[phone].lastDate) byPhone[phone].lastDate = r.date;
+    });
+    Object.values(byPhone).forEach((c) => {
+      const ficha = clients.find((cl) => cl.phone && cl.phone.trim() === c.phone);
+      c.postalCode = (ficha == null ? void 0 : ficha.postalCode) || "";
+    });
+    return Object.values(byPhone).sort((a, b) => b.visits - a.visits);
+  }, [validReservations, clients]);
+  const avgGroupSize = validReservations.length ? (validReservations.reduce((sum, r) => sum + r.partySize, 0) / validReservations.length).toFixed(1) : 0;
+  const byDay = useMemo(() => {
+    const counts = Array(7).fill(0);
+    validReservations.forEach((r) => {
+      if (!r.date) return;
+      const day = (/* @__PURE__ */ new Date(`${r.date}T00:00:00Z`)).getUTCDay();
+      counts[day] += r.partySize;
+    });
+    return counts;
+  }, [validReservations]);
+  const bySlot = useMemo(() => {
+    const counts = {};
+    validReservations.forEach((r) => {
+      counts[r.slot] = (counts[r.slot] || 0) + r.partySize;
+    });
+    return counts;
+  }, [validReservations]);
+  const strongestDay = byDay.indexOf(Math.max(...byDay));
+  const nonZeroDays = byDay.filter((c) => c > 0);
+  const weakestDayCount = nonZeroDays.length ? Math.min(...nonZeroDays) : 0;
+  const weakestDay = byDay.indexOf(weakestDayCount);
+  const slotEntries = Object.entries(bySlot);
+  const strongestSlot = slotEntries.length ? slotEntries.reduce((a, b) => b[1] > a[1] ? b : a)[0] : null;
+  const weakestSlot = slotEntries.length ? slotEntries.reduce((a, b) => b[1] < a[1] ? b : a)[0] : null;
+  return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 640 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Clientes"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Datos sacados de las reservas guardadas (activas y finalizadas, sin canceladas ni no presentados)."), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "Resumen general"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 24, marginTop: 8, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, avgGroupSize), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "personas de media por reserva")), slotEntries.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { ...styles.occupancyNumbers, fontSize: 16 } }, strongestSlot), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "turno m\xE1s fuerte")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { ...styles.occupancyNumbers, fontSize: 16 } }, weakestSlot), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "turno m\xE1s flojo")))), nonZeroDays.length > 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 12 } }, "D\xEDa m\xE1s fuerte: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#8FBF9F" } }, DAY_NAMES[strongestDay]), " \xB7 D\xEDa m\xE1s flojo (para promociones): ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#E8B4A8" } }, DAY_NAMES[weakestDay]))), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 22 } }, "Clientes con m\xE1s visitas (", topClients.length, ")"), topClients.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay suficientes datos.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, topClients.slice(0, 20).map((c, i) => /* @__PURE__ */ React.createElement("div", { key: c.phone, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, i + 1, ". ", c.name, c.visits >= 3 && /* @__PURE__ */ React.createElement("span", { style: { color: "#C9A15A", fontSize: 11, marginLeft: 6 } }, "\u2605 VIP")), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, c.phone, " \xB7 ", c.visits, " ", c.visits === 1 ? "visita" : "visitas", " \xB7 ", c.people, " personas en total", c.postalCode ? ` \xB7 ${c.postalCode}` : "")), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xFAltima: ", c.lastDate))))));
+}
 function AdminReports({ reservations }) {
   const [year, setYear] = useState((/* @__PURE__ */ new Date()).getFullYear());
   const monthCounts = useMemo(() => {
@@ -1181,7 +1256,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   const [mode, setMode] = useState("none");
   const [showOccupancy, setShowOccupancy] = useState(false);
   const [manualSelected, setManualSelected] = useState([]);
-  const [manualForm, setManualForm] = useState({ name: "", phone: "", partySize: "" });
+  const [manualForm, setManualForm] = useState({ name: "", phone: "", email: "", partySize: "" });
   const [manualSaving, setManualSaving] = useState(false);
   const [manualMsg, setManualMsg] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -1301,6 +1376,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     const payload = {
       nombre: manualForm.name,
       telefono: manualForm.phone,
+      email: manualForm.email,
       personas: Number(manualForm.partySize),
       turno: selectedSlot,
       fecha: selectedDate,
@@ -1310,6 +1386,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       const [row] = await sb("reservas", { method: "POST", body: JSON.stringify(payload) });
       setReservations((prev) => [...prev, { id: row.id, name: row.nombre, phone: row.telefono, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids }]);
       setManualMsg("Reserva guardada.");
+      sendConfirmationEmail(manualForm.email, manualForm.name, manualForm.partySize, selectedDate, selectedSlot, area);
     } catch (err) {
       console.error(err);
       setReservations((prev) => [...prev, { id: `local-${Date.now()}`, name: manualForm.name, phone: manualForm.phone, partySize: Number(manualForm.partySize), slot: selectedSlot, date: selectedDate, tableIds: manualSelected }]);
@@ -1317,7 +1394,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     } finally {
       setManualSaving(false);
       setManualSelected([]);
-      setManualForm({ name: "", phone: "", partySize: "" });
+      setManualForm({ name: "", phone: "", email: "", partySize: "" });
       setTimeout(() => setManualMsg(""), 3e3);
     }
   };
@@ -1569,6 +1646,15 @@ function ManualReservationPanel({
       onChange: (e) => setManualForm({ ...manualForm, phone: e.target.value }),
       placeholder: "Opcional"
     }
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "email",
+      style: styles.input,
+      value: manualForm.email,
+      onChange: (e) => setManualForm({ ...manualForm, email: e.target.value }),
+      placeholder: "Opcional \u2014 para mandarle la confirmaci\xF3n"
+    }
   ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Personas"), /* @__PURE__ */ React.createElement(
     "input",
     {
@@ -1706,6 +1792,7 @@ const styles = {
   formTitle: { fontSize: 24, margin: 0, marginBottom: 6 },
   formSubtitle: { fontFamily: "system-ui, sans-serif", fontSize: 13, color: "#9C9488", marginTop: 0, marginBottom: 22, lineHeight: 1.5 },
   label: { fontFamily: "system-ui, sans-serif", fontSize: 12, color: "#9C9488", display: "flex", alignItems: "center", marginBottom: 6, marginTop: 14 },
+  honeypot: { position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden", opacity: 0 },
   input: {
     width: "100%",
     fontFamily: "system-ui, sans-serif",
