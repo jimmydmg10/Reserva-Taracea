@@ -7,6 +7,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   html, body { margin: 0; padding: 0; background: #151310; }
   #root { min-height: 100vh; }
@@ -34,6 +35,20 @@ const { useState, useMemo, useEffect, useRef } = React;
 const PUBLIC_MODE = true;
 const SUPABASE_URL = "https://woqjcdldjmkpmjemnyyh.supabase.co";
 const SUPABASE_KEY = "sb_publishable_wU0yK-S0n21SX_7s0ByXQQ_4IlxouDP";
+function mapReserva(r) {
+  return {
+    id: r.id,
+    name: r.nombre,
+    phone: r.telefono,
+    partySize: r.personas,
+    slot: r.turno,
+    date: r.fecha,
+    tableIds: r.mesa_ids,
+    arrivedAt: r.llegada,
+    estado: r.estado || "activa",
+    cancelReason: r.motivo_cancelacion
+  };
+}
 async function sb(path, options = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...options,
@@ -396,18 +411,7 @@ function App() {
   };
   const refreshReservations = async (isFirstLoad) => {
     const reservas = await sb("reservas?select=*");
-    const mapped = (reservas || []).map((r) => ({
-      id: r.id,
-      name: r.nombre,
-      phone: r.telefono,
-      partySize: r.personas,
-      slot: r.turno,
-      date: r.fecha,
-      tableIds: r.mesa_ids,
-      arrivedAt: r.llegada,
-      estado: r.estado || "activa",
-      cancelReason: r.motivo_cancelacion
-    }));
+    const mapped = (reservas || []).map(mapReserva);
     setReservations(mapped);
     const clientCancellations = mapped.filter((r) => r.estado === "cancelada" && r.cancelReason === "cliente");
     if (isFirstLoad) {
@@ -435,18 +439,7 @@ function App() {
             mesas.map((m) => ({ id: m.id, capacity: m.capacidad, x: Number(m.x), y: Number(m.y), area: m.zona }))
           );
         }
-        const mapped = (reservas || []).map((r) => ({
-          id: r.id,
-          name: r.nombre,
-          phone: r.telefono,
-          partySize: r.personas,
-          slot: r.turno,
-          date: r.fecha,
-          tableIds: r.mesa_ids,
-          arrivedAt: r.llegada,
-          estado: r.estado || "activa",
-          cancelReason: r.motivo_cancelacion
-        }));
+        const mapped = (reservas || []).map(mapReserva);
         setReservations(mapped);
         mapped.filter((r) => r.estado === "cancelada" && r.cancelReason === "cliente").forEach((r) => seenCancelIds.current.add(r.id));
         if (config && config[0]) {
@@ -477,6 +470,36 @@ function App() {
       refreshReservations(false).catch((err) => console.error("No se pudo comprobar cancelaciones:", err));
     }, 2e4);
     return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.supabase) return;
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const channel = client.channel("cambios-taracea").on("postgres_changes", { event: "*", schema: "public", table: "reservas" }, (payload) => {
+      if (payload.eventType === "DELETE") {
+        setReservations((prev) => prev.filter((r2) => r2.id !== payload.old.id));
+        return;
+      }
+      const r = mapReserva(payload.new);
+      setReservations((prev) => {
+        const exists = prev.some((x) => x.id === r.id);
+        return exists ? prev.map((x) => x.id === r.id ? r : x) : [...prev, r];
+      });
+      if (r.estado === "cancelada" && r.cancelReason === "cliente" && !seenCancelIds.current.has(r.id)) {
+        seenCancelIds.current.add(r.id);
+        raiseAlert(r);
+      }
+    }).on("postgres_changes", { event: "*", schema: "public", table: "mesas" }, (payload) => {
+      if (payload.eventType === "DELETE") return;
+      const m = payload.new;
+      setTables((prev) => {
+        const mapped = { id: m.id, capacity: m.capacidad, x: Number(m.x), y: Number(m.y), area: m.zona };
+        const exists = prev.some((t) => t.id === m.id);
+        return exists ? prev.map((t) => t.id === m.id ? mapped : t) : [...prev, mapped];
+      });
+    }).subscribe();
+    return () => {
+      client.removeChannel(channel);
+    };
   }, []);
   const availableAreas = ["Sala", "Terraza"].filter((a) => zoneSettings[a]);
   const [form, setForm] = useState({ name: "", phone: "", email: "", partySize: 2, date: todayISO(), slot: "20:00", area: "Sala" });
@@ -1204,14 +1227,14 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   };
   const areaTables = useMemo(() => tables.filter((t) => t.area === area), [tables, area]);
   const occupancyStats = useMemo(() => {
-    const bySlotDate = reservations.filter((r) => isActiveRes(r) && r.slot === selectedSlot && r.date === selectedDate);
+    const byDate = reservations.filter((r) => isActiveRes(r) && r.date === selectedDate);
     const statsFor = (zone) => {
       const zoneTables = tables.filter((t) => t.area === zone);
       const zoneTableIds = new Set(zoneTables.map((t) => t.id));
-      const zoneReservations = bySlotDate.filter((r) => r.tableIds.some((id) => zoneTableIds.has(id)));
+      const zoneReservations = byDate.filter((r) => r.tableIds.some((id) => zoneTableIds.has(id)));
       const people = zoneReservations.reduce((sum, r) => sum + r.partySize, 0);
       const totalCapacity = zoneTables.reduce((sum, t) => sum + t.capacity, 0);
-      const occupiedCapacity = zoneTables.filter((t) => bySlotDate.some((r) => r.tableIds.includes(t.id))).reduce((sum, t) => sum + t.capacity, 0);
+      const occupiedCapacity = zoneTables.filter((t) => byDate.some((r) => r.tableIds.includes(t.id))).reduce((sum, t) => sum + t.capacity, 0);
       const pct = totalCapacity ? Math.round(occupiedCapacity / totalCapacity * 100) : 0;
       return { people, totalCapacity, occupiedCapacity, pct };
     };
@@ -1225,7 +1248,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       totalOccupiedCapacity: sala.occupiedCapacity + terraza.occupiedCapacity,
       totalPct: sala.totalCapacity + terraza.totalCapacity ? Math.round((sala.occupiedCapacity + terraza.occupiedCapacity) / (sala.totalCapacity + terraza.totalCapacity) * 100) : 0
     };
-  }, [reservations, tables, selectedSlot, selectedDate]);
+  }, [reservations, tables, selectedDate]);
   const toggleManualTable = (tableId) => {
     const { status } = statusOfTable(tableId, reservations, selectedDate, selectedSlot);
     if (status !== "libre" && !manualSelected.includes(tableId)) return;
@@ -1373,7 +1396,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       style: { ...styles.editBtn, ...mode === "espera" ? styles.editBtnActive : {} }
     },
     mode === "espera" ? "Cerrar lista de espera" : "Lista de espera"
-  )), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total (", selectedSlot, ", ", selectedDate, ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real"))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase())), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
+  )), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total del d\xEDa (", selectedDate, ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real"))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase())), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
     "svg",
     {
       viewBox,
