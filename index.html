@@ -32,7 +32,7 @@
 </script>
 <script>
 const { useState, useMemo, useEffect, useRef } = React;
-const PUBLIC_MODE = false;
+const PUBLIC_MODE = true;
 const SUPABASE_URL = "https://woqjcdldjmkpmjemnyyh.supabase.co";
 const SUPABASE_KEY = "sb_publishable_wU0yK-S0n21SX_7s0ByXQQ_4IlxouDP";
 function mapReserva(r) {
@@ -236,7 +236,7 @@ const SLOT_GROUPS = [
   { label: "Comida", slots: ["13:00", "13:30", "14:00", "14:30", "15:00", "15:30"] },
   { label: "Cena", slots: ["20:00", "20:30", "21:00", "21:30", "22:00", "22:30"] }
 ];
-function connectedCombos(freeTables, maxSize) {
+function connectedCombos(freeTables, maxSize, adjacency) {
   const freeIds = new Set(freeTables.map((t) => t.id));
   const seen = /* @__PURE__ */ new Set();
   const results = [];
@@ -253,14 +253,14 @@ function connectedCombos(freeTables, maxSize) {
       const newIds = [...currentIds, candidate];
       const newFrontier = new Set(frontier);
       newFrontier.delete(candidate);
-      (ADJACENCY[candidate] || []).forEach((n) => {
+      (adjacency[candidate] || []).forEach((n) => {
         if (freeIds.has(n) && !newIds.includes(n)) newFrontier.add(n);
       });
       dfs(newIds, [...newFrontier]);
     }
   }
   for (const t of freeTables) {
-    const frontier = new Set((ADJACENCY[t.id] || []).filter((n) => freeIds.has(n)));
+    const frontier = new Set((adjacency[t.id] || []).filter((n) => freeIds.has(n)));
     dfs([t.id], [...frontier]);
   }
   return results;
@@ -286,13 +286,13 @@ function comboBonusCapacity(tableIds) {
   if (tableIds.length === 2) return 1;
   return 0;
 }
-function findBestFit(tables, reservations, date, slot, partySize, area) {
+function findBestFit(tables, reservations, date, slot, partySize, area, adjacency) {
   const isFree = (id) => !reservations.some((r) => isActiveRes(r) && r.date === date && r.tableIds.includes(id));
   const freeTables = tables.filter((t) => isFree(t.id) && t.area === area);
   const byId = Object.fromEntries(tables.map((t) => [t.id, t]));
   const singleFit = freeTables.filter((t) => t.capacity >= partySize && !NEVER_STANDALONE.has(t.id)).sort((a, b) => a.capacity - b.capacity)[0];
   if (singleFit) return { tableIds: [singleFit.id], totalCapacity: singleFit.capacity };
-  const combos = connectedCombos(freeTables, 5).map((ids) => {
+  const combos = connectedCombos(freeTables, 5, adjacency).map((ids) => {
     const sorted = ids.sort();
     const base = ids.reduce((sum, id) => sum + byId[id].capacity, 0);
     return { tableIds: sorted, totalCapacity: base + comboBonusCapacity(sorted) };
@@ -370,6 +370,7 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
 function App() {
   const [view, setView] = useState("cliente");
   const [tables, setTables] = useState(INITIAL_TABLES);
+  const [adjacency, setAdjacency] = useState(ADJACENCY);
   const [reservations, setReservations] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState("20:30");
   const [selectedDate, setSelectedDate] = useState(todayISO());
@@ -429,17 +430,26 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [mesas, reservas, config, clientes, espera] = await Promise.all([
+        const [mesas, reservas, config, clientes, espera, adyacencia] = await Promise.all([
           sb("mesas?select=*"),
           sb("reservas?select=*"),
           sb("configuracion?select=*&id=eq.1").catch(() => null),
           sb("clientes?select=*&order=nombre.asc").catch(() => null),
-          sb("lista_espera?select=*&order=creado_en.asc").catch(() => null)
+          sb("lista_espera?select=*&order=creado_en.asc").catch(() => null),
+          sb("mesas_adyacencia?select=*").catch(() => null)
         ]);
         if (mesas && mesas.length > 0) {
           setTables(
             mesas.map((m) => ({ id: m.id, capacity: m.capacidad, x: Number(m.x), y: Number(m.y), area: m.zona }))
           );
+        }
+        if (adyacencia && adyacencia.length > 0) {
+          const map = {};
+          adyacencia.forEach((a) => {
+            if (!map[a.mesa_id]) map[a.mesa_id] = [];
+            map[a.mesa_id].push(a.vecina_id);
+          });
+          setAdjacency(map);
         }
         const mapped = (reservas || []).map(mapReserva);
         setReservations(mapped);
@@ -564,7 +574,7 @@ function App() {
         return;
       }
     }
-    const fit = findBestFit(tables, reservations, form.date, form.slot, Number(form.partySize), form.area);
+    const fit = findBestFit(tables, reservations, form.date, form.slot, Number(form.partySize), form.area, adjacency);
     if (!fit) {
       setError(`No hay mesas en ${form.area.toLowerCase()} disponibles para ${form.partySize} personas el ${form.date} a las ${form.slot}. Prueba otro horario, otro d\xEDa o la otra zona.`);
       setPendingSuggestion(null);
@@ -681,7 +691,8 @@ function App() {
       clients,
       setClients,
       waitlist,
-      setWaitlist
+      setWaitlist,
+      adjacency
     }
   ) : /* @__PURE__ */ React.createElement(
     AdminView,
@@ -694,7 +705,9 @@ function App() {
       setTables,
       reservations,
       setReservations,
-      clients
+      clients,
+      adjacency,
+      setAdjacency
     }
   ), /* @__PURE__ */ React.createElement("footer", { style: styles.footer }, /* @__PURE__ */ React.createElement("span", null, "AKTEC Manager")));
 }
@@ -843,7 +856,7 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
 }
 const ADMIN_PASSWORD = "taracea2026";
-function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, tables, setTables, reservations, setReservations, clients }) {
+function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
   const [unlocked, setUnlocked] = useState(false);
   const [pass, setPass] = useState("");
   const [wrongPass, setWrongPass] = useState(false);
@@ -888,7 +901,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "mover" && /* @__PURE__ */ React.createElement(AdminMoveReservation, { tables, reservations, setReservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "mover" && /* @__PURE__ */ React.createElement(AdminMoveReservation, { tables, reservations, setReservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -990,11 +1003,15 @@ function AdminReports({ reservations }) {
   const weakestIdx = monthCounts.indexOf(weakestCount);
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 620 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Informes"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("button", { style: styles.yearArrow, onClick: () => setYear((y) => y - 1) }, "\u2039"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 18 } }, year), /* @__PURE__ */ React.createElement("button", { style: styles.yearArrow, onClick: () => setYear((y) => y + 1) }, "\u203A"))), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Reservas hechas por mes (todas, aunque luego se cancelaran)."), /* @__PURE__ */ React.createElement("div", { style: styles.monthsGrid }, MONTH_NAMES.map((name, i) => /* @__PURE__ */ React.createElement("div", { key: name, style: { ...styles.monthCell, background: colorFor(monthCounts[i]) } }, /* @__PURE__ */ React.createElement("span", { style: styles.monthName }, name.slice(0, 3)), /* @__PURE__ */ React.createElement("span", { style: styles.monthCount }, monthCounts[i])))), maxCount > 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 14 } }, "Mes m\xE1s fuerte: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#8FBF9F" } }, MONTH_NAMES[strongestIdx]), " (", monthCounts[strongestIdx], " reservas)", nonZero.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 Mes m\xE1s flojo: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#E8B4A8" } }, MONTH_NAMES[weakestIdx]), " (", weakestCount, " reservas)")), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "Cancelaciones en ", year), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 24, marginTop: 8 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelledByClient), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "cancel\xF3 el cliente")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelledByUs), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "cancelamos nosotros")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelled.length), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "total canceladas")))), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "No presentados en ", year), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, noShows), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "reservas donde el cliente no se present\xF3"))));
 }
-function AdminCreateTable({ tables, setTables }) {
+function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
   const [form, setForm] = useState({ id: "", capacity: "", area: "Sala" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [comboA, setComboA] = useState("");
+  const [comboB, setComboB] = useState("");
+  const [comboMsg, setComboMsg] = useState("");
+  const [comboSaving, setComboSaving] = useState(false);
   const handleCreate = async () => {
     setError("");
     const name = form.id.trim();
@@ -1028,6 +1045,69 @@ function AdminCreateTable({ tables, setTables }) {
       setTimeout(() => setMsg(""), 4e3);
     }
   };
+  const pairs = [];
+  const seenPairs = /* @__PURE__ */ new Set();
+  Object.entries(adjacency).forEach(([a, neighbors]) => {
+    (neighbors || []).forEach((b) => {
+      const key = [a, b].sort().join("|");
+      if (!seenPairs.has(key) && tables.some((t) => t.id === a) && tables.some((t) => t.id === b)) {
+        seenPairs.add(key);
+        pairs.push([a, b]);
+      }
+    });
+  });
+  pairs.sort((p1, p2) => (p1[0] + p1[1]).localeCompare(p2[0] + p2[1]));
+  const handleConnect = async () => {
+    setComboMsg("");
+    if (!comboA || !comboB || comboA === comboB) {
+      setComboMsg("Elige dos mesas distintas.");
+      return;
+    }
+    const already = (adjacency[comboA] || []).includes(comboB);
+    if (already) {
+      setComboMsg("Esas dos mesas ya estaban conectadas.");
+      return;
+    }
+    setComboSaving(true);
+    setAdjacency((prev) => {
+      const next = { ...prev };
+      next[comboA] = [...next[comboA] || [], comboB];
+      next[comboB] = [...next[comboB] || [], comboA];
+      return next;
+    });
+    try {
+      await sb("mesas_adyacencia", {
+        method: "POST",
+        body: JSON.stringify([
+          { mesa_id: comboA, vecina_id: comboB },
+          { mesa_id: comboB, vecina_id: comboA }
+        ])
+      });
+      setComboMsg(`${comboA} y ${comboB} ahora se pueden combinar.`);
+      setComboA("");
+      setComboB("");
+    } catch (err) {
+      console.error(err);
+      setComboMsg("No se pudo guardar en la base de datos (sin conexi\xF3n).");
+    } finally {
+      setComboSaving(false);
+      setTimeout(() => setComboMsg(""), 4e3);
+    }
+  };
+  const handleDisconnect = async (a, b) => {
+    setAdjacency((prev) => {
+      const next = { ...prev };
+      next[a] = (next[a] || []).filter((id) => id !== b);
+      next[b] = (next[b] || []).filter((id) => id !== a);
+      return next;
+    });
+    try {
+      await sb(`mesas_adyacencia?mesa_id=eq.${a}&vecina_id=eq.${b}`, { method: "DELETE" });
+      await sb(`mesas_adyacencia?mesa_id=eq.${b}&vecina_id=eq.${a}`, { method: "DELETE" });
+    } catch (err) {
+      console.error("No se pudo desconectar en la base de datos:", err);
+    }
+  };
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Crear mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "A\xF1ade una mesa nueva al plano con su nombre y capacidad."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre de la mesa"), /* @__PURE__ */ React.createElement(
     "input",
     {
@@ -1045,7 +1125,7 @@ function AdminCreateTable({ tables, setTables }) {
       value: form.capacity,
       onChange: (e) => setForm({ ...form, capacity: e.target.value })
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)));
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Combinaciones de mesas"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Marca qu\xE9 mesas est\xE1n f\xEDsicamente juntas y se pueden combinar para grupos grandes."), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa A"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: comboA, onChange: (e) => setComboA(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige una mesa\u2026"), tables.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " \xB7 ", t.area)))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa B"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: comboB, onChange: (e) => setComboB(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige una mesa\u2026"), tables.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " \xB7 ", t.area))))), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleConnect, disabled: comboSaving }, comboSaving ? "Conectando\u2026" : "Conectar estas dos mesas"), comboMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: comboMsg.includes("no se pudo") || comboMsg.includes("No se pudo") ? "#E8B4A8" : "#8FBF9F" } }, comboMsg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Combinaciones activas (", pairs.length, ")"), pairs.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay ninguna mesa conectada.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, pairs.map(([a, b]) => /* @__PURE__ */ React.createElement("div", { key: `${a}-${b}`, style: styles.resRow }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, a, " \u2194 ", b), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => handleDisconnect(a, b) }, "\u2715")))), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 12 } }, "Solo hace falta conectar mesas contiguas, en cadena (A-B, B-C, C-D...). La app ya calcula sola todas las combinaciones posibles a partir de esas conexiones \u2014 no hace falta conectar cada pareja posible a mano.")));
 }
 function AdminFloorEditor({ tables, setTables, reservations }) {
   const [area, setArea] = useState("Sala");
@@ -1250,7 +1330,7 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const [area, setArea] = useState("Sala");
   const [mode, setMode] = useState("none");
@@ -1347,7 +1427,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     ).length;
     const occupancy = areaTables.length ? occupiedInArea / areaTables.length : 0;
     const waste = manualCapacity - partySize;
-    const autoFit = findBestFit(tables, reservations, selectedDate, selectedSlot, partySize, area);
+    const autoFit = findBestFit(tables, reservations, selectedDate, selectedSlot, partySize, area, adjacency);
     const autoIsBetter = autoFit && (autoFit.tableIds.length < manualSelected.length || autoFit.tableIds.length === manualSelected.length && autoFit.totalCapacity < manualCapacity) && JSON.stringify([...autoFit.tableIds].sort()) !== JSON.stringify([...manualSelected].sort());
     let level = "ok";
     let text;
@@ -1487,7 +1567,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       for (let i = 0; i < r.tableIds.length; i++) {
         for (let j = i + 1; j < r.tableIds.length; j++) {
           const idA = r.tableIds[i], idB = r.tableIds[j];
-          if (!(ADJACENCY[idA] || []).includes(idB)) continue;
+          if (!(adjacency[idA] || []).includes(idB)) continue;
           const a = areaTables.find((t) => t.id === idA);
           const b = areaTables.find((t) => t.id === idB);
           if (!a || !b) continue;
