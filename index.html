@@ -292,7 +292,7 @@ function findBestFit(tables, reservations, date, slot, partySize, area, adjacenc
   const byId = Object.fromEntries(tables.map((t) => [t.id, t]));
   const singleFit = freeTables.filter((t) => t.capacity >= partySize && !NEVER_STANDALONE.has(t.id)).sort((a, b) => a.capacity - b.capacity)[0];
   if (singleFit) return { tableIds: [singleFit.id], totalCapacity: singleFit.capacity };
-  const combos = connectedCombos(freeTables, 5, adjacency).map((ids) => {
+  const combos = connectedCombos(freeTables, 6, adjacency).map((ids) => {
     const sorted = ids.sort();
     const base = ids.reduce((sum, id) => sum + byId[id].capacity, 0);
     return { tableIds: sorted, totalCapacity: base + comboBonusCapacity(sorted) };
@@ -890,7 +890,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
     { id: "zonas", label: "Zonas" },
     { id: "plano", label: "Editar plano" },
     { id: "mover", label: "Mover reserva" },
-    { id: "crear", label: "Crear mesa" },
+    { id: "crear", label: "Crear y combinar mesas" },
     { id: "informes", label: "Informes" },
     { id: "clientes", label: "Clientes" }
   ].map((t) => /* @__PURE__ */ React.createElement(
@@ -1008,8 +1008,9 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-  const [comboA, setComboA] = useState("");
-  const [comboB, setComboB] = useState("");
+  const [comboArea, setComboArea] = useState("Sala");
+  const [pendingReplace, setPendingReplace] = useState(null);
+  const [comboChain, setComboChain] = useState(["", "", "", "", "", ""]);
   const [comboMsg, setComboMsg] = useState("");
   const [comboSaving, setComboSaving] = useState(false);
   const handleCreate = async () => {
@@ -1045,47 +1046,47 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
       setTimeout(() => setMsg(""), 4e3);
     }
   };
+  const areaTablesForCombo = tables.filter((t) => t.area === comboArea);
   const pairs = [];
   const seenPairs = /* @__PURE__ */ new Set();
+  const idsInArea = new Set(areaTablesForCombo.map((t) => t.id));
   Object.entries(adjacency).forEach(([a, neighbors]) => {
+    if (!idsInArea.has(a)) return;
     (neighbors || []).forEach((b) => {
+      if (!idsInArea.has(b)) return;
       const key = [a, b].sort().join("|");
-      if (!seenPairs.has(key) && tables.some((t) => t.id === a) && tables.some((t) => t.id === b)) {
+      if (!seenPairs.has(key)) {
         seenPairs.add(key);
         pairs.push([a, b]);
       }
     });
   });
   pairs.sort((p1, p2) => (p1[0] + p1[1]).localeCompare(p2[0] + p2[1]));
-  const handleConnect = async () => {
-    setComboMsg("");
-    if (!comboA || !comboB || comboA === comboB) {
-      setComboMsg("Elige dos mesas distintas.");
-      return;
-    }
-    const already = (adjacency[comboA] || []).includes(comboB);
-    if (already) {
-      setComboMsg("Esas dos mesas ya estaban conectadas.");
-      return;
+  const setChainSlot = (index, value) => {
+    setComboChain((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+  const createChainEdges = async (filled) => {
+    const newEdges = [];
+    for (let i = 0; i < filled.length - 1; i++) {
+      newEdges.push({ mesa_id: filled[i], vecina_id: filled[i + 1] });
+      newEdges.push({ mesa_id: filled[i + 1], vecina_id: filled[i] });
     }
     setComboSaving(true);
     setAdjacency((prev) => {
       const next = { ...prev };
-      next[comboA] = [...next[comboA] || [], comboB];
-      next[comboB] = [...next[comboB] || [], comboA];
+      newEdges.forEach(({ mesa_id, vecina_id }) => {
+        next[mesa_id] = [.../* @__PURE__ */ new Set([...next[mesa_id] || [], vecina_id])];
+      });
       return next;
     });
     try {
-      await sb("mesas_adyacencia", {
-        method: "POST",
-        body: JSON.stringify([
-          { mesa_id: comboA, vecina_id: comboB },
-          { mesa_id: comboB, vecina_id: comboA }
-        ])
-      });
-      setComboMsg(`${comboA} y ${comboB} ahora se pueden combinar.`);
-      setComboA("");
-      setComboB("");
+      await sb("mesas_adyacencia", { method: "POST", body: JSON.stringify(newEdges) });
+      setComboMsg(`Conectadas: ${filled.join(" \u2014 ")}.`);
+      setComboChain(["", "", "", "", "", ""]);
     } catch (err) {
       console.error(err);
       setComboMsg("No se pudo guardar en la base de datos (sin conexi\xF3n).");
@@ -1093,6 +1094,61 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
       setComboSaving(false);
       setTimeout(() => setComboMsg(""), 4e3);
     }
+  };
+  const handleConnectChain = () => {
+    setComboMsg("");
+    const filled = comboChain.filter((id) => id);
+    if (new Set(filled).size !== filled.length) {
+      setComboMsg("Hay una mesa repetida en la cadena.");
+      return;
+    }
+    if (filled.length < 2) {
+      setComboMsg("Elige al menos dos mesas para conectar.");
+      return;
+    }
+    const existingPairs = [];
+    for (let i = 0; i < filled.length; i++) {
+      for (let j = i + 1; j < filled.length; j++) {
+        if ((adjacency[filled[i]] || []).includes(filled[j])) {
+          existingPairs.push([filled[i], filled[j]]);
+        }
+      }
+    }
+    if (existingPairs.length > 0) {
+      setPendingReplace({ filled, existingPairs });
+      return;
+    }
+    createChainEdges(filled);
+  };
+  const confirmReplace = async () => {
+    const { filled, existingPairs } = pendingReplace;
+    setPendingReplace(null);
+    setComboSaving(true);
+    try {
+      for (const [a, b] of existingPairs) {
+        await sb(`mesas_adyacencia?mesa_id=eq.${a}&vecina_id=eq.${b}`, { method: "DELETE" });
+        await sb(`mesas_adyacencia?mesa_id=eq.${b}&vecina_id=eq.${a}`, { method: "DELETE" });
+      }
+      setAdjacency((prev) => {
+        const next = { ...prev };
+        existingPairs.forEach(([a, b]) => {
+          next[a] = (next[a] || []).filter((id) => id !== b);
+          next[b] = (next[b] || []).filter((id) => id !== a);
+        });
+        return next;
+      });
+    } catch (err) {
+      console.error(err);
+      setComboMsg("No se pudo sustituir la combinaci\xF3n (sin conexi\xF3n).");
+      setComboSaving(false);
+      return;
+    }
+    await createChainEdges(filled);
+  };
+  const cancelReplace = () => {
+    setPendingReplace(null);
+    setComboMsg("Cancelado, no se ha tocado nada.");
+    setTimeout(() => setComboMsg(""), 3e3);
   };
   const handleDisconnect = async (a, b) => {
     setAdjacency((prev) => {
@@ -1125,7 +1181,15 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
       value: form.capacity,
       onChange: (e) => setForm({ ...form, capacity: e.target.value })
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Combinaciones de mesas"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Marca qu\xE9 mesas est\xE1n f\xEDsicamente juntas y se pueden combinar para grupos grandes."), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa A"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: comboA, onChange: (e) => setComboA(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige una mesa\u2026"), tables.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " \xB7 ", t.area)))), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa B"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: comboB, onChange: (e) => setComboB(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige una mesa\u2026"), tables.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " \xB7 ", t.area))))), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleConnect, disabled: comboSaving }, comboSaving ? "Conectando\u2026" : "Conectar estas dos mesas"), comboMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: comboMsg.includes("no se pudo") || comboMsg.includes("No se pudo") ? "#E8B4A8" : "#8FBF9F" } }, comboMsg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Combinaciones activas (", pairs.length, ")"), pairs.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay ninguna mesa conectada.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, pairs.map(([a, b]) => /* @__PURE__ */ React.createElement("div", { key: `${a}-${b}`, style: styles.resRow }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, a, " \u2194 ", b), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => handleDisconnect(a, b) }, "\u2715")))), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 12 } }, "Solo hace falta conectar mesas contiguas, en cadena (A-B, B-C, C-D...). La app ya calcula sola todas las combinaciones posibles a partir de esas conexiones \u2014 no hace falta conectar cada pareja posible a mano.")));
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Combinaciones de mesas"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Marca qu\xE9 mesas est\xE1n f\xEDsicamente juntas, en fila, y se pueden combinar para grupos grandes (hasta 6 mesas seguidas)."), /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: a,
+      onClick: () => setComboArea(a),
+      style: { ...styles.areaChip, ...a === comboArea ? styles.areaChipActive : {} }
+    },
+    a
+  ))), /* @__PURE__ */ React.createElement("div", { style: styles.comboChainGrid }, ["A", "B", "C", "D", "E", "F"].map((letter, i) => /* @__PURE__ */ React.createElement("div", { key: letter }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa ", letter), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: comboChain[i], onChange: (e) => setChainSlot(i, e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014"), areaTablesForCombo.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id)))))), /* @__PURE__ */ React.createElement("p", { style: styles.hint }, "Rellena solo las que necesites, en orden \u2014 se conectan de izquierda a derecha (A-B, B-C, C-D...). Con dos ya vale."), pendingReplace ? /* @__PURE__ */ React.createElement("div", { style: styles.cancelReasonBox }, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Esa combinaci\xF3n ya est\xE1 creada. \xBFQuieres sustituirla por esta cadena nueva?"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10 } }, /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: confirmReplace, disabled: comboSaving }, comboSaving ? "Sustituyendo\u2026" : "S\xED, sustituir"), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: cancelReplace, disabled: comboSaving }, "No, cancelar"))) : /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleConnectChain, disabled: comboSaving }, comboSaving ? "Conectando\u2026" : "Conectar esta cadena"), comboMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: comboMsg.includes("no se pudo") || comboMsg.includes("No se pudo") ? "#E8B4A8" : "#8FBF9F" } }, comboMsg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Combinaciones activas en ", comboArea, " (", pairs.length, ")"), pairs.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay ninguna mesa conectada en esta zona.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, pairs.map(([a, b]) => /* @__PURE__ */ React.createElement("div", { key: `${a}-${b}`, style: styles.resRow }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, a, " \u2194 ", b), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => handleDisconnect(a, b) }, "\u2715")))), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 12 } }, "Solo hace falta conectar mesas contiguas, en cadena (A-B, B-C, C-D...). La app ya calcula sola todas las combinaciones posibles a partir de esas conexiones \u2014 no hace falta conectar cada pareja posible a mano.")));
 }
 function AdminFloorEditor({ tables, setTables, reservations }) {
   const [area, setArea] = useState("Sala");
@@ -1142,6 +1206,7 @@ function AdminFloorEditor({ tables, setTables, reservations }) {
     return { w: maxX, h: maxY };
   }, [areaTables]);
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
+  const [zoom, setZoom] = useState(0.5);
   const toSvgPoint = (clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -1173,13 +1238,12 @@ function AdminFloorEditor({ tables, setTables, reservations }) {
     }
     setDraggingId(null);
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { ...styles.staffTop, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement("button", { key: a, onClick: () => setArea(a), style: { ...styles.areaChip, ...a === area ? styles.areaChipActive : {} } }, a)))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), /* @__PURE__ */ React.createElement("span", { style: styles.editHint }, "Arrastra las mesas para reubicarlas")), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { ...styles.staffTop, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement("button", { key: a, onClick: () => setArea(a), style: { ...styles.areaChip, ...a === area ? styles.areaChipActive : {} } }, a)))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), /* @__PURE__ */ React.createElement("span", { style: styles.editHint }, "Arrastra las mesas para reubicarlas"), /* @__PURE__ */ React.createElement("div", { style: styles.zoomControls }, /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.max(0.5, z - 0.5)), disabled: zoom <= 0.5 }, "\uFF0D"), /* @__PURE__ */ React.createElement("span", { style: styles.zoomLabel }, zoom === 0.5 ? "Ajustado" : `${zoom}\xD7`), /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.min(3, z + 0.5)), disabled: zoom >= 3 }, "\uFF0B"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.floor, overflow: zoom === 0.5 ? "hidden" : "auto" } }, /* @__PURE__ */ React.createElement(
     "svg",
     {
       ref: svgRef,
       viewBox,
-      width: floorDims.w,
-      height: floorDims.h,
+      ...zoom === 0.5 ? { width: "100%", height: "100%", preserveAspectRatio: "xMidYMid meet" } : { width: floorDims.w * zoom, height: floorDims.h * zoom },
       style: { ...styles.floorSvg, touchAction: draggingId ? "none" : "auto" },
       onPointerMove: handlePointerMove,
       onPointerUp: handlePointerUp,
@@ -1232,6 +1296,7 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
     const maxY = Math.max(...centers.map((c) => c.y)) + 130;
     return { w: maxX, h: maxY };
   }, [areaTables]);
+  const [zoom, setZoom] = useState(0.5);
   const destCapacity = destTables.reduce((sum, id) => {
     var _a;
     return sum + (((_a = tables.find((t) => t.id === id)) == null ? void 0 : _a.capacity) || 0);
@@ -1277,12 +1342,11 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
     setSlot(s);
     setSelectedRes(null);
     setDestTables([]);
-  }, style: { ...styles.slotChip, ...s === slot ? styles.slotChipActive : {} } }, s)))))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), selectedRes && /* @__PURE__ */ React.createElement("span", { style: styles.editHint }, "Toca las mesas para a\xF1adirlas o quitarlas del destino")), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
+  }, style: { ...styles.slotChip, ...s === slot ? styles.slotChipActive : {} } }, s)))))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), selectedRes && /* @__PURE__ */ React.createElement("span", { style: styles.editHint }, "Toca las mesas para a\xF1adirlas o quitarlas del destino"), /* @__PURE__ */ React.createElement("div", { style: styles.zoomControls }, /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.max(0.5, z - 0.5)), disabled: zoom <= 0.5 }, "\uFF0D"), /* @__PURE__ */ React.createElement("span", { style: styles.zoomLabel }, zoom === 0.5 ? "Ajustado" : `${zoom}\xD7`), /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.min(3, z + 0.5)), disabled: zoom >= 3 }, "\uFF0B"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.floor, overflow: zoom === 0.5 ? "hidden" : "auto" } }, /* @__PURE__ */ React.createElement(
     "svg",
     {
       viewBox: `0 0 ${floorDims.w} ${floorDims.h}`,
-      width: floorDims.w,
-      height: floorDims.h,
+      ...zoom === 0.5 ? { width: "100%", height: "100%", preserveAspectRatio: "xMidYMid meet" } : { width: floorDims.w * zoom, height: floorDims.h * zoom },
       style: styles.floorSvg
     },
     areaTables.map((t) => {
@@ -1486,6 +1550,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     return { w: maxX, h: maxY };
   }, [areaTables]);
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
+  const [zoom, setZoom] = useState(0.5);
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1554,12 +1619,11 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       style: { ...styles.editBtn, ...mode === "espera" ? styles.editBtnActive : {} }
     },
     mode === "espera" ? "Cerrar lista de espera" : "Lista de espera"
-  )), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total del d\xEDa (", selectedDate, ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real"))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase())), /* @__PURE__ */ React.createElement("div", { style: styles.floor }, /* @__PURE__ */ React.createElement(
+  )), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total del d\xEDa (", selectedDate, ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real"))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), /* @__PURE__ */ React.createElement("div", { style: styles.zoomControls }, /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.max(0.5, z - 0.5)), disabled: zoom <= 0.5 }, "\uFF0D"), /* @__PURE__ */ React.createElement("span", { style: styles.zoomLabel }, zoom === 0.5 ? "Ajustado" : `${zoom}\xD7`), /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => Math.min(3, z + 0.5)), disabled: zoom >= 3 }, "\uFF0B"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.floor, overflow: zoom === 0.5 ? "hidden" : "auto" } }, /* @__PURE__ */ React.createElement(
     "svg",
     {
       viewBox,
-      width: floorDims.w,
-      height: floorDims.h,
+      ...zoom === 0.5 ? { width: "100%", height: "100%", preserveAspectRatio: "xMidYMid meet" } : { width: floorDims.w * zoom, height: floorDims.h * zoom },
       style: styles.floorSvg
     },
     slotReservations.filter((r) => r.tableIds.length > 1).flatMap((r) => {
@@ -1950,6 +2014,9 @@ const styles = {
   floorWrap: { flex: 2, background: "#1B1916", border: "1px solid #2A2822", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column" },
   floorHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
   floorHeaderText: { fontSize: 13, color: "#9C9488" },
+  zoomControls: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" },
+  zoomBtn: { width: 26, height: 26, borderRadius: 6, border: "1px solid #3A3833", background: "#1F1D19", color: "#D8D2C6", fontSize: 14, lineHeight: 1, cursor: "pointer" },
+  zoomLabel: { fontSize: 11, color: "#9C9488", minWidth: 54, textAlign: "center" },
   floor: { position: "relative", flex: 1, minHeight: 480, background: "#151310", borderRadius: 10, overflow: "auto", userSelect: "none", WebkitOverflowScrolling: "touch" },
   floorSvg: { display: "block", maxWidth: "none" },
   legend: { display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" },
@@ -1974,6 +2041,7 @@ const styles = {
   noShowBtn: { marginTop: 8, width: "100%", fontFamily: "system-ui, sans-serif", fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid #4A473F", color: "#9C9488", borderRadius: 8, padding: "9px 0", cursor: "pointer" },
   yearArrow: { fontSize: 20, background: "transparent", border: "1px solid #3A3833", color: "#D8D2C6", borderRadius: 6, width: 32, height: 32, cursor: "pointer", lineHeight: 1 },
   monthsGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 16 },
+  comboChainGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 },
   monthCell: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 8, padding: "14px 4px", gap: 4 },
   monthName: { fontSize: 11, color: "#F2EDE6", fontFamily: "system-ui, sans-serif", textTransform: "uppercase", letterSpacing: 0.5 },
   monthCount: { fontSize: 20, fontWeight: 700, color: "#F2EDE6" },
