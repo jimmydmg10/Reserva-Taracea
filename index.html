@@ -889,7 +889,6 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, [
     { id: "zonas", label: "Zonas" },
     { id: "plano", label: "Editar plano" },
-    { id: "mover", label: "Mover reserva" },
     { id: "crear", label: "Crear y combinar mesas" },
     { id: "informes", label: "Informes" },
     { id: "clientes", label: "Clientes" }
@@ -901,7 +900,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "mover" && /* @__PURE__ */ React.createElement(AdminMoveReservation, { tables, reservations, setReservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -1271,7 +1270,7 @@ function AdminFloorEditor({ tables, setTables, reservations }) {
     })
   )))));
 }
-function AdminMoveReservation({ tables, reservations, setReservations }) {
+function AdminMoveReservation({ tables, reservations, setReservations, onClose }) {
   const [slot, setSlot] = useState("20:30");
   const [date, setDate] = useState(todayISO());
   const [selectedRes, setSelectedRes] = useState(null);
@@ -1326,7 +1325,7 @@ function AdminMoveReservation({ tables, reservations, setReservations }) {
       setTimeout(() => setMsg(""), 3e3);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { ...styles.staffTop, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement("button", { key: a, onClick: () => setArea(a), style: { ...styles.areaChip, ...a === area ? styles.areaChipActive : {} } }, a))), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, onClose && /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onClose }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("div", { style: { ...styles.staffTop, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement("button", { key: a, onClick: () => setArea(a), style: { ...styles.areaChip, ...a === area ? styles.areaChipActive : {} } }, a))), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "date",
@@ -1551,6 +1550,17 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   }, [areaTables]);
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   const [zoom, setZoom] = useState(0.5);
+  if (mode === "mover") {
+    return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
+      AdminMoveReservation,
+      {
+        tables,
+        reservations,
+        setReservations,
+        onClose: () => setMode("none")
+      }
+    ));
+  }
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1581,11 +1591,21 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   ))))), /* @__PURE__ */ React.createElement(
     "button",
     {
-      onClick: () => setShowOccupancy((v) => !v),
-      style: { ...styles.editBtn, ...showOccupancy ? styles.editBtnActive : {} },
-      title: "Ver ocupaci\xF3n total"
+      onClick: () => {
+        setMode((m) => m === "manual" ? "none" : "manual");
+        setSelectedTable(null);
+        setManualSelected([]);
+      },
+      style: { ...styles.editBtn, ...mode === "manual" ? styles.editBtnActive : {} }
     },
-    "\u{1F4CA} Ocupaci\xF3n"
+    mode === "manual" ? "Cancelar reserva manual" : "Reserva manual"
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => setMode("mover"),
+      style: styles.editBtn
+    },
+    "Mover reserva"
   ), /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1600,14 +1620,11 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   ), /* @__PURE__ */ React.createElement(
     "button",
     {
-      onClick: () => {
-        setMode((m) => m === "manual" ? "none" : "manual");
-        setSelectedTable(null);
-        setManualSelected([]);
-      },
-      style: { ...styles.editBtn, ...mode === "manual" ? styles.editBtnActive : {} }
+      onClick: () => setShowOccupancy((v) => !v),
+      style: { ...styles.editBtn, ...showOccupancy ? styles.editBtnActive : {} },
+      title: "Ver ocupaci\xF3n total"
     },
-    mode === "manual" ? "Cancelar reserva manual" : "Reserva manual"
+    "\u{1F4CA} Ocupaci\xF3n"
   ), /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -2014,6 +2031,7 @@ const styles = {
   floorWrap: { flex: 2, background: "#1B1916", border: "1px solid #2A2822", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column" },
   floorHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
   floorHeaderText: { fontSize: 13, color: "#9C9488" },
+  backToStaffBtn: { fontFamily: "system-ui, sans-serif", fontSize: 12, color: "#C9A15A", background: "transparent", border: "none", cursor: "pointer", padding: 0, marginBottom: 12 },
   zoomControls: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" },
   zoomBtn: { width: 26, height: 26, borderRadius: 6, border: "1px solid #3A3833", background: "#1F1D19", color: "#D8D2C6", fontSize: 14, lineHeight: 1, cursor: "pointer" },
   zoomLabel: { fontSize: 11, color: "#9C9488", minWidth: 54, textAlign: "center" },
