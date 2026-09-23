@@ -40,6 +40,7 @@ function mapReserva(r) {
     id: r.id,
     name: r.nombre,
     phone: r.telefono,
+    email: r.email,
     partySize: r.personas,
     slot: r.turno,
     date: r.fecha,
@@ -71,6 +72,7 @@ async function sb(path, options = {}) {
 const EMAILJS_PUBLIC_KEY = "F9Fy_3A5b79D6Rsk5";
 const EMAILJS_SERVICE_ID = "service_m9duwem";
 const EMAILJS_TEMPLATE_ID = "template_xuxbu7a";
+const EMAILJS_CANCEL_TEMPLATE_ID = "";
 function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area) {
   if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID) return;
   if (!toEmail || !toEmail.trim()) return;
@@ -83,6 +85,18 @@ function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area) {
     res_time: slot,
     res_area: area
   }).catch((err) => console.error("No se pudo mandar el email de confirmaci\xF3n:", err));
+}
+function sendCancellationEmail(toEmail, toName, partySize, date, slot) {
+  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_CANCEL_TEMPLATE_ID) return;
+  if (!toEmail || !toEmail.trim()) return;
+  if (typeof window === "undefined" || !window.emailjs) return;
+  window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_CANCEL_TEMPLATE_ID, {
+    to_email: toEmail,
+    to_name: toName,
+    party_size: partySize,
+    res_date: date,
+    res_time: slot
+  }).catch((err) => console.error("No se pudo mandar el email de cancelaci\xF3n:", err));
 }
 const INITIAL_TABLES = [
   { id: "5", capacity: 7, x: 1, y: 1, area: "Terraza" },
@@ -409,7 +423,7 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
   );
 }
 function App() {
-  const [view, setView] = useState("cliente");
+  const [view, setView] = useState(PUBLIC_MODE ? "cliente" : "staff");
   const [tables, setTables] = useState(INITIAL_TABLES);
   const [adjacency, setAdjacency] = useState(ADJACENCY);
   const [reservations, setReservations] = useState([]);
@@ -680,13 +694,6 @@ function App() {
   ), notifPermission === "denied" && /* @__PURE__ */ React.createElement("span", { style: { ...styles.clockBadge, color: "#E8B4A8" }, title: "Los avisos del navegador est\xE1n bloqueados. Act\xEDvalos en los ajustes del sitio de tu navegador." }, "\u{1F515} avisos bloqueados")), !PUBLIC_MODE && /* @__PURE__ */ React.createElement("nav", { style: styles.nav }, /* @__PURE__ */ React.createElement(
     "button",
     {
-      onClick: () => setView("cliente"),
-      style: { ...styles.navBtn, ...view === "cliente" ? styles.navBtnActive : {} }
-    },
-    "Reservar"
-  ), /* @__PURE__ */ React.createElement(
-    "button",
-    {
       onClick: () => setView("staff"),
       style: { ...styles.navBtn, ...view === "staff" ? styles.navBtnActive : {} }
     },
@@ -866,18 +873,20 @@ function minutesUntilReservation(r) {
 }
 function ClientCancelFlow({ reservations, onCancel, onBack }) {
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [searched, setSearched] = useState(false);
   const [cancelledId, setCancelledId] = useState(null);
   const [confirmingId, setConfirmingId] = useState(null);
-  const matches = phone.trim() ? reservations.filter(
-    (r) => isActiveRes(r) && r.phone && r.phone.trim() === phone.trim() && r.date >= todayISO()
+  const matches = phone.trim() && email.trim() ? reservations.filter(
+    (r) => isActiveRes(r) && r.phone && r.phone.trim() === phone.trim() && (!r.email || r.email.trim().toLowerCase() === email.trim().toLowerCase()) && r.date >= todayISO()
   ) : [];
-  const handleCancel = (id) => {
-    onCancel(id);
-    setCancelledId(id);
+  const handleCancel = (r) => {
+    onCancel(r.id);
+    sendCancellationEmail(r.email, r.name, r.partySize, r.date, r.slot);
+    setCancelledId(r.id);
     setConfirmingId(null);
   };
-  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Cancelar reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Escribe el tel\xE9fono con el que reservaste para encontrarla."), /* @__PURE__ */ React.createElement("div", { style: styles.policyBox }, "Puedes cancelar tu reserva online hasta ", CANCEL_MIN_MINUTES, " minutos antes de la hora reservada. Pasado ese plazo, llama al restaurante para avisar."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Cancelar reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Escribe el tel\xE9fono y el email con los que reservaste para encontrarla."), /* @__PURE__ */ React.createElement("div", { style: styles.policyBox }, "Puedes cancelar tu reserva online hasta ", CANCEL_MIN_MINUTES, " minutos antes de la hora reservada. Pasado ese plazo, llama al restaurante para avisar."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "tel",
@@ -890,10 +899,23 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
       },
       placeholder: "El mismo que usaste al reservar"
     }
-  ), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setSearched(true), disabled: !phone.trim() }, "Buscar mi reserva"), searched && matches.length === 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 14 } }, "No encontramos ninguna reserva pr\xF3xima con ese tel\xE9fono."), searched && matches.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16 } }, matches.map((r) => {
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "email",
+      style: styles.input,
+      value: email,
+      onChange: (e) => {
+        setEmail(e.target.value);
+        setSearched(false);
+        setCancelledId(null);
+      },
+      placeholder: "El mismo que usaste al reservar"
+    }
+  ), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setSearched(true), disabled: !phone.trim() || !email.trim() }, "Buscar mi reserva"), searched && matches.length === 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 14 } }, "No encontramos ninguna reserva pr\xF3xima con ese tel\xE9fono y ese email."), searched && matches.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16 } }, matches.map((r) => {
     const minsLeft = minutesUntilReservation(r);
     const tooLate = minsLeft < CANCEL_MIN_MINUTES;
-    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.date, " \xB7 ", r.slot), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, r.partySize, " personas \xB7 mesa ", r.tableIds.join(" + ")), tooLate && cancelledId !== r.id && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#E8B4A8", marginTop: 4 } }, "Ya no se puede cancelar online (faltan menos de ", CANCEL_MIN_MINUTES, " min). Llama al restaurante.")), cancelledId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 12 } }, "Cancelada") : tooLate ? null : confirmingId === r.id ? /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => handleCancel(r.id) }, "Confirmar cancelaci\xF3n") : /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => setConfirmingId(r.id) }, "Cancelar"));
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.date, " \xB7 ", r.slot), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, r.partySize, " personas \xB7 mesa ", r.tableIds.join(" + ")), tooLate && cancelledId !== r.id && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#E8B4A8", marginTop: 4 } }, "Ya no se puede cancelar online (faltan menos de ", CANCEL_MIN_MINUTES, " min). Llama al restaurante.")), cancelledId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 12 } }, "Cancelada") : tooLate ? null : confirmingId === r.id ? /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => handleCancel(r) }, "Confirmar cancelaci\xF3n") : /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => setConfirmingId(r.id) }, "Cancelar"));
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
 }
 const ADMIN_PASSWORD = "taracea2026";
