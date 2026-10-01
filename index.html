@@ -69,6 +69,24 @@ async function sb(path, options = {}) {
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
+async function uploadDocumentPhoto(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+  const path = `${Date.now()}-${safeName}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/documentos/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": file.type || "application/octet-stream"
+    },
+    body: file
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Subida de archivo \u2192 ${res.status}: ${body}`);
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/documentos/${path}`;
+}
 const EMAILJS_PUBLIC_KEY = "F9Fy_3A5b79D6Rsk5";
 const EMAILJS_SERVICE_ID = "service_m9duwem";
 const EMAILJS_TEMPLATE_ID = "template_xuxbu7a";
@@ -959,7 +977,8 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
     { id: "plano", label: "Editar plano" },
     { id: "crear", label: "Crear y combinar mesas" },
     { id: "informes", label: "Informes" },
-    { id: "clientes", label: "Clientes" }
+    { id: "clientes", label: "Clientes" },
+    { id: "stock", label: "Stock" }
   ].map((t) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -968,7 +987,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -1036,6 +1055,249 @@ function AdminClientStats({ reservations, clients }) {
   const strongestSlot = slotEntries.length ? slotEntries.reduce((a, b) => b[1] > a[1] ? b : a)[0] : null;
   const weakestSlot = slotEntries.length ? slotEntries.reduce((a, b) => b[1] < a[1] ? b : a)[0] : null;
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 640 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Clientes"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Datos sacados de las reservas guardadas (activas y finalizadas, sin canceladas ni no presentados)."), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "Resumen general"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 24, marginTop: 8, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, avgGroupSize), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "personas de media por reserva")), slotEntries.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { ...styles.occupancyNumbers, fontSize: 16 } }, strongestSlot), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "turno m\xE1s fuerte")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { ...styles.occupancyNumbers, fontSize: 16 } }, weakestSlot), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "turno m\xE1s flojo")))), nonZeroDays.length > 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 12 } }, "D\xEDa m\xE1s fuerte: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#8FBF9F" } }, DAY_NAMES[strongestDay]), " \xB7 D\xEDa m\xE1s flojo (para promociones): ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#E8B4A8" } }, DAY_NAMES[weakestDay]))), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 22 } }, "Clientes con m\xE1s visitas (", topClients.length, ")"), topClients.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay suficientes datos.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, topClients.slice(0, 20).map((c, i) => /* @__PURE__ */ React.createElement("div", { key: c.phone, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, i + 1, ". ", c.name, c.visits >= 3 && /* @__PURE__ */ React.createElement("span", { style: { color: "#C9A15A", fontSize: 11, marginLeft: 6 } }, "\u2605 VIP")), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, c.phone, " \xB7 ", c.visits, " ", c.visits === 1 ? "visita" : "visitas", " \xB7 ", c.people, " personas en total", c.postalCode ? ` \xB7 ${c.postalCode}` : "")), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xFAltima: ", c.lastDate))))));
+}
+function AdminStock() {
+  const [subTab, setSubTab] = useState("productos");
+  const [loading, setLoading] = useState(true);
+  const [proveedores, setProveedores] = useState([]);
+  const [productos, setProductos] = useState([]);
+  const [albaranes, setAlbaranes] = useState([]);
+  const [facturas, setFacturas] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [p, prod, alb, fac] = await Promise.all([
+          sb("proveedores?select=*&order=nombre.asc"),
+          sb("productos_stock?select=*&order=nombre.asc"),
+          sb("albaranes?select=*,albaran_items(*)&order=fecha.desc"),
+          sb("facturas?select=*&order=fecha.desc")
+        ]);
+        setProveedores(p || []);
+        setProductos(prod || []);
+        setAlbaranes(alb || []);
+        setFacturas(fac || []);
+      } catch (err) {
+        console.error("No se pudo cargar Stock:", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+  const proveedorNombre = (id) => {
+    var _a;
+    return ((_a = proveedores.find((p) => p.id === id)) == null ? void 0 : _a.nombre) || "\u2014";
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 640 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Stock"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Proveedores, productos, albaranes y facturas del restaurante."), /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, [
+    { id: "productos", label: "Productos" },
+    { id: "proveedores", label: "Proveedores" },
+    { id: "albaranes", label: "Albaranes" },
+    { id: "facturas", label: "Facturas" }
+  ].map((t) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: t.id,
+      onClick: () => setSubTab(t.id),
+      style: { ...styles.areaChip, ...subTab === t.id ? styles.areaChipActive : {} }
+    },
+    t.label
+  ))), loading ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Cargando\u2026") : /* @__PURE__ */ React.createElement(React.Fragment, null, subTab === "productos" && /* @__PURE__ */ React.createElement(StockProductos, { productos, setProductos, proveedores, proveedorNombre }), subTab === "proveedores" && /* @__PURE__ */ React.createElement(StockProveedores, { proveedores, setProveedores }), subTab === "albaranes" && /* @__PURE__ */ React.createElement(
+    StockAlbaranes,
+    {
+      albaranes,
+      setAlbaranes,
+      proveedores,
+      productos,
+      setProductos,
+      proveedorNombre
+    }
+  ), subTab === "facturas" && /* @__PURE__ */ React.createElement(
+    StockFacturas,
+    {
+      facturas,
+      setFacturas,
+      proveedores,
+      albaranes,
+      proveedorNombre
+    }
+  ))));
+}
+function StockProveedores({ proveedores, setProveedores }) {
+  const [form, setForm] = useState({ nombre: "", telefono: "", email: "" });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const handleSave = async () => {
+    if (!form.nombre.trim()) return;
+    setSaving(true);
+    try {
+      const [row] = await sb("proveedores", { method: "POST", body: JSON.stringify(form) });
+      setProveedores((prev) => [...prev, row].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setForm({ nombre: "", telefono: "", email: "" });
+      setMsg("Proveedor guardado.");
+    } catch (err) {
+      console.error(err);
+      setMsg("No se pudo guardar (sin conexi\xF3n).");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 3e3);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Nombre del proveedor"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.nombre, onChange: (e) => setForm({ ...form, nombre: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement("input", { type: "tel", style: styles.input, value: form.telefono, onChange: (e) => setForm({ ...form, telefono: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email"), /* @__PURE__ */ React.createElement("input", { type: "email", style: styles.input, value: form.email, onChange: (e) => setForm({ ...form, email: e.target.value }) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving || !form.nombre.trim() }, saving ? "Guardando\u2026" : "A\xF1adir proveedor"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Proveedores (", proveedores.length, ")"), proveedores.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay proveedores guardados.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, proveedores.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, p.nombre), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, p.telefono || "sin tel\xE9fono", " ", p.email ? `\xB7 ${p.email}` : ""))))));
+}
+function StockProductos({ productos, setProductos, proveedores, proveedorNombre }) {
+  const [form, setForm] = useState({ nombre: "", unidad: "ud", cantidad_actual: "", cantidad_minima: "", proveedor_habitual_id: "" });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [adjusting, setAdjusting] = useState(null);
+  const handleSave = async () => {
+    if (!form.nombre.trim()) return;
+    setSaving(true);
+    const payload = {
+      nombre: form.nombre,
+      unidad: form.unidad || "ud",
+      cantidad_actual: Number(form.cantidad_actual) || 0,
+      cantidad_minima: Number(form.cantidad_minima) || 0,
+      proveedor_habitual_id: form.proveedor_habitual_id || null
+    };
+    try {
+      const [row] = await sb("productos_stock", { method: "POST", body: JSON.stringify(payload) });
+      setProductos((prev) => [...prev, row].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setForm({ nombre: "", unidad: "ud", cantidad_actual: "", cantidad_minima: "", proveedor_habitual_id: "" });
+      setMsg("Producto guardado.");
+    } catch (err) {
+      console.error(err);
+      setMsg("No se pudo guardar (sin conexi\xF3n).");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 3e3);
+    }
+  };
+  const adjustQty = async (producto, delta) => {
+    const nueva = Math.max(0, Number(producto.cantidad_actual) + delta);
+    setProductos((prev) => prev.map((p) => p.id === producto.id ? { ...p, cantidad_actual: nueva } : p));
+    try {
+      await sb(`productos_stock?id=eq.${producto.id}`, { method: "PATCH", body: JSON.stringify({ cantidad_actual: nueva }) });
+    } catch (err) {
+      console.error("No se pudo ajustar el stock:", err);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Nombre del producto"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.nombre, onChange: (e) => setForm({ ...form, nombre: e.target.value }), placeholder: "Ej: Aceite de oliva" }), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Unidad"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.unidad, onChange: (e) => setForm({ ...form, unidad: e.target.value }), placeholder: "kg, l, ud\u2026" })), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Cantidad actual"), /* @__PURE__ */ React.createElement("input", { type: "number", style: styles.input, value: form.cantidad_actual, onChange: (e) => setForm({ ...form, cantidad_actual: e.target.value }) }))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Avisar cuando quede menos de"), /* @__PURE__ */ React.createElement("input", { type: "number", style: styles.input, value: form.cantidad_minima, onChange: (e) => setForm({ ...form, cantidad_minima: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Proveedor habitual (opcional)"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.proveedor_habitual_id, onChange: (e) => setForm({ ...form, proveedor_habitual_id: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014"), proveedores.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre))), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving || !form.nombre.trim() }, saving ? "Guardando\u2026" : "A\xF1adir producto"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Productos (", productos.length, ")"), productos.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay productos guardados.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, productos.map((p) => {
+    const low = Number(p.cantidad_actual) <= Number(p.cantidad_minima);
+    return /* @__PURE__ */ React.createElement("div", { key: p.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, p.nombre, low && /* @__PURE__ */ React.createElement("span", { style: { color: "#E8B4A8", fontSize: 11, marginLeft: 6 } }, "\u26A0\uFE0F queda poco")), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, p.cantidad_actual, " ", p.unidad, " \xB7 m\xEDnimo ", p.cantidad_minima, " ", p.unidad, p.proveedor_habitual_id ? ` \xB7 ${proveedorNombre(p.proveedor_habitual_id)}` : "")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => adjustQty(p, -1) }, "\uFF0D"), /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => adjustQty(p, 1) }, "\uFF0B")));
+  })));
+}
+function StockAlbaranes({ albaranes, setAlbaranes, proveedores, productos, setProductos, proveedorNombre }) {
+  const [proveedorId, setProveedorId] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [notas, setNotas] = useState("");
+  const [items, setItems] = useState([{ producto_id: "", cantidad: "" }]);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const setItem = (i, field, value) => {
+    setItems((prev) => prev.map((it, idx) => idx === i ? { ...it, [field]: value } : it));
+  };
+  const addItemRow = () => setItems((prev) => [...prev, { producto_id: "", cantidad: "" }]);
+  const handleSave = async () => {
+    const filled = items.filter((it) => it.producto_id && it.cantidad);
+    if (!proveedorId || filled.length === 0) {
+      setMsg("Elige un proveedor y al menos un producto con cantidad.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let fotoUrl = null;
+      if (photoFile) fotoUrl = await uploadDocumentPhoto(photoFile);
+      const [alb] = await sb("albaranes", {
+        method: "POST",
+        body: JSON.stringify({ proveedor_id: proveedorId, fecha, notas, foto_url: fotoUrl })
+      });
+      const itemRows = filled.map((it) => {
+        var _a;
+        return {
+          albaran_id: alb.id,
+          producto_id: it.producto_id,
+          producto_nombre: ((_a = productos.find((p) => p.id === it.producto_id)) == null ? void 0 : _a.nombre) || "",
+          cantidad: Number(it.cantidad)
+        };
+      });
+      const savedItems = await sb("albaran_items", { method: "POST", body: JSON.stringify(itemRows) });
+      for (const it of filled) {
+        const prod = productos.find((p) => p.id === it.producto_id);
+        if (!prod) continue;
+        const nueva = Number(prod.cantidad_actual) + Number(it.cantidad);
+        await sb(`productos_stock?id=eq.${prod.id}`, { method: "PATCH", body: JSON.stringify({ cantidad_actual: nueva }) });
+        setProductos((prev) => prev.map((p) => p.id === prod.id ? { ...p, cantidad_actual: nueva } : p));
+      }
+      setAlbaranes((prev) => [{ ...alb, albaran_items: savedItems }, ...prev]);
+      setProveedorId("");
+      setFecha(todayISO());
+      setNotas("");
+      setItems([{ producto_id: "", cantidad: "" }]);
+      setPhotoFile(null);
+      setMsg("Albar\xE1n guardado y stock actualizado.");
+    } catch (err) {
+      console.error(err);
+      setMsg("No se pudo guardar (sin conexi\xF3n).");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 4e3);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Proveedor"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: proveedorId, onChange: (e) => setProveedorId(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un proveedor\u2026"), proveedores.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Fecha"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: fecha, onChange: (e) => setFecha(e.target.value) }), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Productos recibidos"), items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.row }, /* @__PURE__ */ React.createElement("select", { style: { ...styles.input, flex: 2 }, value: it.producto_id, onChange: (e) => setItem(i, "producto_id", e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un producto\u2026"), productos.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre, " (", p.unidad, ")"))), /* @__PURE__ */ React.createElement("input", { type: "number", style: { ...styles.input, flex: 1 }, placeholder: "Cantidad", value: it.cantidad, onChange: (e) => setItem(i, "cantidad", e.target.value) }))), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.waitlistRemoveBtn, onClick: addItemRow }, "+ A\xF1adir l\xEDnea"), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Foto del albar\xE1n (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*,.pdf", style: styles.input, onChange: (e) => {
+    var _a;
+    return setPhotoFile(((_a = e.target.files) == null ? void 0 : _a[0]) || null);
+  } }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: notas, onChange: (e) => setNotas(e.target.value) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving }, saving ? "Guardando\u2026" : "Guardar albar\xE1n (sube el stock)"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: msg.includes("No se pudo") ? "#E8B4A8" : "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Albaranes (", albaranes.length, ")"), albaranes.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay albaranes guardados.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, albaranes.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, proveedorNombre(a.proveedor_id), " \xB7 ", formatDateEs(a.fecha)), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, (a.albaran_items || []).length, " producto", (a.albaran_items || []).length === 1 ? "" : "s", a.foto_url && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: a.foto_url, target: "_blank", rel: "noreferrer", style: { color: "#C9A15A" } }, "ver foto"))))))));
+}
+function StockFacturas({ facturas, setFacturas, proveedores, albaranes, proveedorNombre }) {
+  const [form, setForm] = useState({ proveedor_id: "", albaran_id: "", numero: "", fecha: todayISO(), importe: "", notas: "" });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const handleSave = async () => {
+    if (!form.proveedor_id) {
+      setMsg("Elige un proveedor.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let fotoUrl = null;
+      if (photoFile) fotoUrl = await uploadDocumentPhoto(photoFile);
+      const payload = {
+        proveedor_id: form.proveedor_id,
+        albaran_id: form.albaran_id || null,
+        numero: form.numero,
+        fecha: form.fecha,
+        importe: form.importe ? Number(form.importe) : null,
+        notas: form.notas,
+        foto_url: fotoUrl,
+        pagada: false
+      };
+      const [row] = await sb("facturas", { method: "POST", body: JSON.stringify(payload) });
+      setFacturas((prev) => [row, ...prev]);
+      setForm({ proveedor_id: "", albaran_id: "", numero: "", fecha: todayISO(), importe: "", notas: "" });
+      setPhotoFile(null);
+      setMsg("Factura guardada.");
+    } catch (err) {
+      console.error(err);
+      setMsg("No se pudo guardar (sin conexi\xF3n).");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 4e3);
+    }
+  };
+  const togglePagada = async (f) => {
+    const nueva = !f.pagada;
+    setFacturas((prev) => prev.map((x) => x.id === f.id ? { ...x, pagada: nueva } : x));
+    try {
+      await sb(`facturas?id=eq.${f.id}`, { method: "PATCH", body: JSON.stringify({ pagada: nueva }) });
+    } catch (err) {
+      console.error("No se pudo actualizar la factura:", err);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Proveedor"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.proveedor_id, onChange: (e) => setForm({ ...form, proveedor_id: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un proveedor\u2026"), proveedores.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Albar\xE1n relacionado (opcional)"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.albaran_id, onChange: (e) => setForm({ ...form, albaran_id: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014"), albaranes.filter((a) => !form.proveedor_id || a.proveedor_id === form.proveedor_id).map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, formatDateEs(a.fecha), " \xB7 ", proveedorNombre(a.proveedor_id)))), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "N\xFAmero de factura"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.numero, onChange: (e) => setForm({ ...form, numero: e.target.value }) })), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Fecha"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: form.fecha, onChange: (e) => setForm({ ...form, fecha: e.target.value }) }))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Importe (\u20AC)"), /* @__PURE__ */ React.createElement("input", { type: "number", style: styles.input, value: form.importe, onChange: (e) => setForm({ ...form, importe: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Foto de la factura (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*,.pdf", style: styles.input, onChange: (e) => {
+    var _a;
+    return setPhotoFile(((_a = e.target.files) == null ? void 0 : _a[0]) || null);
+  } }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.notas, onChange: (e) => setForm({ ...form, notas: e.target.value }) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving }, saving ? "Guardando\u2026" : "Guardar factura"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: msg.includes("No se pudo") || msg.includes("Elige") ? "#E8B4A8" : "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Facturas (", facturas.length, ")"), facturas.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay facturas guardadas.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, facturas.map((f) => /* @__PURE__ */ React.createElement("div", { key: f.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, proveedorNombre(f.proveedor_id), " ", f.numero ? `\xB7 n\xBA ${f.numero}` : "", f.pagada ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 11, marginLeft: 6 } }, "\u2713 pagada") : /* @__PURE__ */ React.createElement("span", { style: { color: "#E8B4A8", fontSize: 11, marginLeft: 6 } }, "pendiente")), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, formatDateEs(f.fecha), " ", f.importe != null ? `\xB7 ${f.importe} \u20AC` : "", f.foto_url && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: f.foto_url, target: "_blank", rel: "noreferrer", style: { color: "#C9A15A" } }, "ver foto")))), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => togglePagada(f) }, f.pagada ? "Marcar pendiente" : "Marcar pagada")))));
 }
 function AdminReports({ reservations }) {
   const [year, setYear] = useState((/* @__PURE__ */ new Date()).getFullYear());
