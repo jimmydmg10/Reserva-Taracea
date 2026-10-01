@@ -1091,7 +1091,8 @@ function AdminStock() {
     { id: "productos", label: "Productos" },
     { id: "proveedores", label: "Proveedores" },
     { id: "albaranes", label: "Albaranes" },
-    { id: "facturas", label: "Facturas" }
+    { id: "facturas", label: "Facturas" },
+    { id: "precios", label: "Precios" }
   ].map((t) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1119,7 +1120,7 @@ function AdminStock() {
       albaranes,
       proveedorNombre
     }
-  ))));
+  ), subTab === "precios" && /* @__PURE__ */ React.createElement(StockPrecios, { albaranes, productos }))));
 }
 function StockProveedores({ proveedores, setProveedores }) {
   const [form, setForm] = useState({ nombre: "", telefono: "", email: "" });
@@ -1189,14 +1190,14 @@ function StockAlbaranes({ albaranes, setAlbaranes, proveedores, productos, setPr
   const [proveedorId, setProveedorId] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   const [notas, setNotas] = useState("");
-  const [items, setItems] = useState([{ producto_id: "", cantidad: "" }]);
+  const [items, setItems] = useState([{ producto_id: "", cantidad: "", precio_unitario: "" }]);
   const [photoFile, setPhotoFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const setItem = (i, field, value) => {
     setItems((prev) => prev.map((it, idx) => idx === i ? { ...it, [field]: value } : it));
   };
-  const addItemRow = () => setItems((prev) => [...prev, { producto_id: "", cantidad: "" }]);
+  const addItemRow = () => setItems((prev) => [...prev, { producto_id: "", cantidad: "", precio_unitario: "" }]);
   const handleSave = async () => {
     const filled = items.filter((it) => it.producto_id && it.cantidad);
     if (!proveedorId || filled.length === 0) {
@@ -1217,7 +1218,8 @@ function StockAlbaranes({ albaranes, setAlbaranes, proveedores, productos, setPr
           albaran_id: alb.id,
           producto_id: it.producto_id,
           producto_nombre: ((_a = productos.find((p) => p.id === it.producto_id)) == null ? void 0 : _a.nombre) || "",
-          cantidad: Number(it.cantidad)
+          cantidad: Number(it.cantidad),
+          precio_unitario: it.precio_unitario ? Number(it.precio_unitario) : null
         };
       });
       const savedItems = await sb("albaran_items", { method: "POST", body: JSON.stringify(itemRows) });
@@ -1232,7 +1234,7 @@ function StockAlbaranes({ albaranes, setAlbaranes, proveedores, productos, setPr
       setProveedorId("");
       setFecha(todayISO());
       setNotas("");
-      setItems([{ producto_id: "", cantidad: "" }]);
+      setItems([{ producto_id: "", cantidad: "", precio_unitario: "" }]);
       setPhotoFile(null);
       setMsg("Albar\xE1n guardado y stock actualizado.");
     } catch (err) {
@@ -1243,7 +1245,7 @@ function StockAlbaranes({ albaranes, setAlbaranes, proveedores, productos, setPr
       setTimeout(() => setMsg(""), 4e3);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Proveedor"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: proveedorId, onChange: (e) => setProveedorId(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un proveedor\u2026"), proveedores.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Fecha"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: fecha, onChange: (e) => setFecha(e.target.value) }), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Productos recibidos"), items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.row }, /* @__PURE__ */ React.createElement("select", { style: { ...styles.input, flex: 2 }, value: it.producto_id, onChange: (e) => setItem(i, "producto_id", e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un producto\u2026"), productos.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre, " (", p.unidad, ")"))), /* @__PURE__ */ React.createElement("input", { type: "number", style: { ...styles.input, flex: 1 }, placeholder: "Cantidad", value: it.cantidad, onChange: (e) => setItem(i, "cantidad", e.target.value) }))), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.waitlistRemoveBtn, onClick: addItemRow }, "+ A\xF1adir l\xEDnea"), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Foto del albar\xE1n (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*,.pdf", style: styles.input, onChange: (e) => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 16 } }, "Proveedor"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: proveedorId, onChange: (e) => setProveedorId(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un proveedor\u2026"), proveedores.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Fecha"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: fecha, onChange: (e) => setFecha(e.target.value) }), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Productos recibidos"), items.map((it, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.row }, /* @__PURE__ */ React.createElement("select", { style: { ...styles.input, flex: 2 }, value: it.producto_id, onChange: (e) => setItem(i, "producto_id", e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Elige un producto\u2026"), productos.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.nombre, " (", p.unidad, ")"))), /* @__PURE__ */ React.createElement("input", { type: "number", style: { ...styles.input, flex: 1 }, placeholder: "Cantidad", value: it.cantidad, onChange: (e) => setItem(i, "cantidad", e.target.value) }), /* @__PURE__ */ React.createElement("input", { type: "number", style: { ...styles.input, flex: 1 }, placeholder: "Precio/ud (\u20AC)", value: it.precio_unitario, onChange: (e) => setItem(i, "precio_unitario", e.target.value) }))), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.waitlistRemoveBtn, onClick: addItemRow }, "+ A\xF1adir l\xEDnea"), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 14 } }, "Foto del albar\xE1n (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*,.pdf", style: styles.input, onChange: (e) => {
     var _a;
     return setPhotoFile(((_a = e.target.files) == null ? void 0 : _a[0]) || null);
   } }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: notas, onChange: (e) => setNotas(e.target.value) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving }, saving ? "Guardando\u2026" : "Guardar albar\xE1n (sube el stock)"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: msg.includes("No se pudo") ? "#E8B4A8" : "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Albaranes (", albaranes.length, ")"), albaranes.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay albaranes guardados.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, albaranes.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, proveedorNombre(a.proveedor_id), " \xB7 ", formatDateEs(a.fecha)), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, (a.albaran_items || []).length, " producto", (a.albaran_items || []).length === 1 ? "" : "s", a.foto_url && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: a.foto_url, target: "_blank", rel: "noreferrer", style: { color: "#C9A15A" } }, "ver foto"))))))));
@@ -1298,6 +1300,30 @@ function StockFacturas({ facturas, setFacturas, proveedores, albaranes, proveedo
     var _a;
     return setPhotoFile(((_a = e.target.files) == null ? void 0 : _a[0]) || null);
   } }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.notas, onChange: (e) => setForm({ ...form, notas: e.target.value }) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving }, saving ? "Guardando\u2026" : "Guardar factura"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: msg.includes("No se pudo") || msg.includes("Elige") ? "#E8B4A8" : "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Facturas (", facturas.length, ")"), facturas.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay facturas guardadas.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, facturas.map((f) => /* @__PURE__ */ React.createElement("div", { key: f.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, proveedorNombre(f.proveedor_id), " ", f.numero ? `\xB7 n\xBA ${f.numero}` : "", f.pagada ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 11, marginLeft: 6 } }, "\u2713 pagada") : /* @__PURE__ */ React.createElement("span", { style: { color: "#E8B4A8", fontSize: 11, marginLeft: 6 } }, "pendiente")), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, formatDateEs(f.fecha), " ", f.importe != null ? `\xB7 ${f.importe} \u20AC` : "", f.foto_url && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: f.foto_url, target: "_blank", rel: "noreferrer", style: { color: "#C9A15A" } }, "ver foto")))), /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => togglePagada(f) }, f.pagada ? "Marcar pendiente" : "Marcar pagada")))));
+}
+function StockPrecios({ albaranes, productos }) {
+  const today = todayISO();
+  const oneYearAgoDate = /* @__PURE__ */ new Date(`${today}T00:00:00Z`);
+  oneYearAgoDate.setUTCFullYear(oneYearAgoDate.getUTCFullYear() - 1);
+  const oneYearAgoISO = oneYearAgoDate.toISOString().slice(0, 10);
+  const priceHistory = {};
+  albaranes.forEach((a) => {
+    (a.albaran_items || []).forEach((it) => {
+      if (it.precio_unitario == null || !it.producto_id) return;
+      if (!priceHistory[it.producto_id]) priceHistory[it.producto_id] = [];
+      priceHistory[it.producto_id].push({ fecha: a.fecha, precio: Number(it.precio_unitario) });
+    });
+  });
+  const rows = Object.entries(priceHistory).map(([productoId, entries]) => {
+    const sorted = entries.slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const latest = sorted[sorted.length - 1];
+    const pastCandidates = sorted.filter((e) => e.fecha <= oneYearAgoISO);
+    const past = pastCandidates.length ? pastCandidates[pastCandidates.length - 1] : null;
+    const prod = productos.find((p) => p.id === productoId);
+    const change = past && past.precio ? (latest.precio - past.precio) / past.precio * 100 : null;
+    return { productoId, nombre: (prod == null ? void 0 : prod.nombre) || "(producto eliminado)", unidad: (prod == null ? void 0 : prod.unidad) || "ud", latest, past, change };
+  }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 16 } }, "Comparaci\xF3n del precio m\xE1s reciente con el precio de hace aproximadamente un a\xF1o, calculado a partir de los precios que apuntes en cada albar\xE1n."), rows.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay ning\xFAn precio guardado \u2014 apunta el precio por unidad al crear un albar\xE1n.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, rows.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.productoId, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.nombre), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, "Hoy: ", r.latest.precio, " \u20AC/", r.unidad, " (", formatDateEs(r.latest.fecha), ")", r.past ? ` \xB7 Hace ~1 a\xF1o: ${r.past.precio} \u20AC/${r.unidad} (${formatDateEs(r.past.fecha)})` : " \xB7 todav\xEDa no hay un precio de hace un a\xF1o")), r.change != null && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: r.change > 0 ? "#E8B4A8" : r.change < 0 ? "#8FBF9F" : "#9C9488" } }, r.change > 0 ? "\u25B2" : r.change < 0 ? "\u25BC" : "=", " ", Math.abs(r.change).toFixed(1), "%")))));
 }
 function AdminReports({ reservations }) {
   const [year, setYear] = useState((/* @__PURE__ */ new Date()).getFullYear());
