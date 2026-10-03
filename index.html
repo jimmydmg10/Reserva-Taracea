@@ -471,28 +471,101 @@ function App() {
   const [waitlist, setWaitlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const seenCancelIds = React.useRef(/* @__PURE__ */ new Set());
-  const playAlertSound = () => {
+  const seenReservationIds = React.useRef(/* @__PURE__ */ new Set());
+  const seededReservations = React.useRef(false);
+  const ownSignatures = React.useRef(/* @__PURE__ */ new Map());
+  const tablesRef = React.useRef(tables);
+  tablesRef.current = tables;
+  const playAlertSound = (kind) => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(1e-3, ctx.currentTime + 0.5);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.5);
+      if (ctx.resume) ctx.resume();
+      const beep = (freq, startAt, dur) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.15, ctx.currentTime + startAt);
+        gain.gain.exponentialRampToValueAtTime(1e-3, ctx.currentTime + startAt + dur);
+        osc.start(ctx.currentTime + startAt);
+        osc.stop(ctx.currentTime + startAt + dur);
+      };
+      if (kind === "nueva") {
+        beep(660, 0, 0.25);
+        beep(880, 0.3, 0.35);
+      } else {
+        beep(880, 0, 0.5);
+      }
+      setTimeout(() => {
+        if (ctx.close) ctx.close();
+      }, 1500);
+    } catch (err) {
+    }
+  };
+  const showSystemNotification = (title, body, tag) => {
+    try {
+      if (!window.Notification || Notification.permission !== "granted") return;
+      try {
+        const n = new Notification(title, { body, tag });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch (e) {
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+          navigator.serviceWorker.getRegistration().then((reg) => {
+            if (reg && reg.showNotification) reg.showNotification(title, { body, tag, icon: "icon-192.png" });
+          });
+        }
+      }
     } catch (err) {
     }
   };
   const raiseAlert = (res) => {
+    if (PUBLIC_MODE) return;
     const text = `${res.name} ha cancelado su reserva de ${res.partySize} personas (${res.slot}, ${res.date}) \u2014 mesa${res.tableIds.length > 1 ? "s" : ""} ${res.tableIds.join(" + ")} libre${res.tableIds.length > 1 ? "s" : ""}.`;
-    setAlerts((prev) => [{ id: res.id, text }, ...prev]);
-    playAlertSound();
-    if (window.Notification && Notification.permission === "granted") {
-      new Notification("\u26A0\uFE0F Cancelaci\xF3n de cliente", { body: `${res.name} \u2014 ${res.slot} (${res.date})` });
-    }
+    setAlerts((prev) => [{ id: res.id, kind: "cancelacion", text }, ...prev].slice(0, 6));
+    playAlertSound("cancelacion");
+    showSystemNotification("\u26A0\uFE0F Cancelaci\xF3n de cliente", `${res.name} \u2014 ${res.slot} (${res.date})`, `cancel-${res.id}`);
+  };
+  const raiseNewReservationAlert = (r) => {
+    var _a;
+    const area = (_a = tablesRef.current.find((t) => t.id === r.tableIds[0])) == null ? void 0 : _a.area;
+    const text = `Nueva reserva: ${r.name} \u2014 ${r.partySize} personas, ${r.slot} (${formatDateEs(r.date)})${area ? ` \xB7 ${area}` : ""} \xB7 mesa${r.tableIds.length > 1 ? "s" : ""} ${r.tableIds.join(" + ")}.`;
+    setAlerts((prev) => [{ id: `new-${r.id}`, kind: "nueva", text }, ...prev].slice(0, 6));
+    playAlertSound("nueva");
+    showSystemNotification("\u{1F514} Nueva reserva", `${r.name} \u2014 ${r.partySize} pers., ${r.slot} (${formatDateEs(r.date)})`, `new-${r.id}`);
+  };
+  const raiseNewReservationsSummary = (count) => {
+    const text = `Han entrado ${count} reservas nuevas mientras no estabas mirando. Revisa el plano.`;
+    setAlerts((prev) => [{ id: `new-summary-${Date.now()}`, kind: "nueva", text }, ...prev].slice(0, 6));
+    playAlertSound("nueva");
+    showSystemNotification("\u{1F514} Reservas nuevas", `${count} reservas nuevas`, "new-summary");
+  };
+  const reservationSig = (r) => `${(r.name || "").trim().toLowerCase()}|${(r.phone || "").trim()}|${r.date}|${r.slot}`;
+  const registerOwnReservation = (r) => {
+    ownSignatures.current.set(reservationSig(r), Date.now() + 3e4);
+  };
+  const consumeOwnSignature = (r) => {
+    const sig = reservationSig(r);
+    const expires = ownSignatures.current.get(sig);
+    ownSignatures.current.delete(sig);
+    return !!expires && expires > Date.now();
+  };
+  const handleNewReservations = (list) => {
+    const fresh = [];
+    list.forEach((r) => {
+      if (seenReservationIds.current.has(r.id)) return;
+      seenReservationIds.current.add(r.id);
+      if (PUBLIC_MODE) return;
+      if (r.estado !== "activa") return;
+      if (consumeOwnSignature(r)) return;
+      fresh.push(r);
+    });
+    if (fresh.length === 0) return;
+    if (fresh.length > 3) raiseNewReservationsSummary(fresh.length);
+    else fresh.forEach((r) => raiseNewReservationAlert(r));
   };
   const refreshReservations = async (isFirstLoad) => {
     const reservas = await sb("reservas?select=*");
@@ -507,6 +580,12 @@ function App() {
         nuevas.forEach((r) => seenCancelIds.current.add(r.id));
         nuevas.forEach((r) => raiseAlert(r));
       }
+    }
+    if (isFirstLoad || !seededReservations.current) {
+      mapped.forEach((r) => seenReservationIds.current.add(r.id));
+      seededReservations.current = true;
+    } else {
+      handleNewReservations(mapped.filter((r) => !seenReservationIds.current.has(r.id)));
     }
   };
   useEffect(() => {
@@ -536,6 +615,8 @@ function App() {
         const mapped = (reservas || []).map(mapReserva);
         setReservations(mapped);
         mapped.filter((r) => r.estado === "cancelada" && r.cancelReason === "cliente").forEach((r) => seenCancelIds.current.add(r.id));
+        mapped.forEach((r) => seenReservationIds.current.add(r.id));
+        seededReservations.current = true;
         if (config && config[0]) {
           setZoneSettings({ Sala: !!config[0].sala_activa, Terraza: !!config[0].terraza_activa });
           setReservasPausadas(!!config[0].reservas_pausadas);
@@ -547,7 +628,7 @@ function App() {
           setWaitlist(espera.map((w) => ({ id: w.id, name: w.nombre, partySize: w.personas, createdAt: w.creado_en })));
         }
         setDbStatus("ok");
-        if (window.Notification && Notification.permission === "default") {
+        if (!PUBLIC_MODE && window.Notification && Notification.permission === "default") {
           Notification.requestPermission().then((p) => setNotifPermission(p));
         }
         if (EMAILJS_PUBLIC_KEY && window.emailjs) {
@@ -578,6 +659,9 @@ function App() {
         const exists = prev.some((x) => x.id === r.id);
         return exists ? prev.map((x) => x.id === r.id ? r : x) : [...prev, r];
       });
+      if (payload.eventType === "INSERT" && seededReservations.current) {
+        handleNewReservations([r]);
+      }
       if (r.estado === "cancelada" && r.cancelReason === "cliente" && !seenCancelIds.current.has(r.id)) {
         seenCancelIds.current.add(r.id);
         raiseAlert(r);
@@ -702,7 +786,7 @@ function App() {
           filter: invert(1);
           cursor: pointer;
         }
-      `), alerts.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, alerts.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: styles.alertBanner }, /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, "\u26A0\uFE0F"), /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
+      `), alerts.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, alerts.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: a.kind === "nueva" ? styles.alertBannerNew : styles.alertBanner }, /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, a.kind === "nueva" ? "\u{1F514}" : "\u26A0\uFE0F"), /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
     "span",
     {
       style: {
@@ -711,14 +795,14 @@ function App() {
       }
     },
     dbStatus === "ok" ? "\u25CF conectado" : dbStatus === "error" ? "\u25CF sin conexi\xF3n (modo local)" : "\u25CF cargando\u2026"
-  ), /* @__PURE__ */ React.createElement("span", { style: styles.clockBadge }, clockNow.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }), " \xB7 ", clockNow.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" })), notifPermission === "default" && /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("span", { style: styles.clockBadge }, clockNow.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }), " \xB7 ", clockNow.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" })), !PUBLIC_MODE && notifPermission === "default" && /* @__PURE__ */ React.createElement(
     "button",
     {
       style: styles.notifBtn,
       onClick: () => Notification.requestPermission().then((p) => setNotifPermission(p))
     },
     "\u{1F514} Activar avisos"
-  ), notifPermission === "denied" && /* @__PURE__ */ React.createElement("span", { style: { ...styles.clockBadge, color: "#E8B4A8" }, title: "Los avisos del navegador est\xE1n bloqueados. Act\xEDvalos en los ajustes del sitio de tu navegador." }, "\u{1F515} avisos bloqueados")), !PUBLIC_MODE && /* @__PURE__ */ React.createElement("nav", { style: styles.nav }, /* @__PURE__ */ React.createElement(
+  ), !PUBLIC_MODE && notifPermission === "denied" && /* @__PURE__ */ React.createElement("span", { style: { ...styles.clockBadge, color: "#E8B4A8" }, title: "Los avisos del navegador est\xE1n bloqueados. Act\xEDvalos en los ajustes del sitio de tu navegador." }, "\u{1F515} avisos bloqueados")), !PUBLIC_MODE && /* @__PURE__ */ React.createElement("nav", { style: styles.nav }, /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => setView("staff"),
@@ -767,7 +851,8 @@ function App() {
       setClients,
       waitlist,
       setWaitlist,
-      adjacency
+      adjacency,
+      onOwnReservation: registerOwnReservation
     }
   ) : /* @__PURE__ */ React.createElement(
     AdminView,
@@ -1768,7 +1853,7 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const [area, setArea] = useState("Sala");
   const [mode, setMode] = useState("none");
@@ -1915,6 +2000,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       fecha: selectedDate,
       mesa_ids: manualSelected
     };
+    if (onOwnReservation) onOwnReservation({ name: manualForm.name, phone: manualForm.phone, date: selectedDate, slot: selectedSlot });
     try {
       const [row] = await sb("reservas", { method: "POST", body: JSON.stringify(payload) });
       setReservations((prev) => [...prev, { id: row.id, name: row.nombre, phone: row.telefono, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids }]);
@@ -2350,6 +2436,7 @@ const styles = {
   clockBadge: { fontFamily: "system-ui, sans-serif", fontSize: 10, marginLeft: 10, color: "#9C9488", letterSpacing: 0.2 },
   notifBtn: { fontFamily: "system-ui, sans-serif", fontSize: 10, marginLeft: 10, background: "#C9A15A", color: "#1C1A17", border: "none", borderRadius: 12, padding: "4px 10px", cursor: "pointer", fontWeight: 600 },
   alertStack: { position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 1e3, display: "flex", flexDirection: "column", gap: 8, width: "min(92%, 480px)" },
+  alertBannerNew: { display: "flex", alignItems: "flex-start", gap: 10, background: "#1B2A1E", border: "1px solid #5E8F66", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
   alertBanner: { display: "flex", alignItems: "flex-start", gap: 10, background: "#3A1616", border: "1px solid #B15347", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
   alertIcon: { fontSize: 18, lineHeight: 1 },
   alertText: { flex: 1, fontFamily: "system-ui, sans-serif", fontSize: 13, color: "#F2D9D4", lineHeight: 1.4 },
