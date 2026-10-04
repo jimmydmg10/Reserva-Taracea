@@ -95,30 +95,62 @@ const EMAILJS_PUBLIC_KEY = "F9Fy_3A5b79D6Rsk5";
 const EMAILJS_SERVICE_ID = "service_m9duwem";
 const EMAILJS_TEMPLATE_ID = "template_xuxbu7a";
 const EMAILJS_CANCEL_TEMPLATE_ID = "";
+const EMAILJS_REJECT_TEMPLATE_ID = "";
 function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area) {
-  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID) return;
-  if (!toEmail || !toEmail.trim()) return;
-  if (typeof window === "undefined" || !window.emailjs) return;
-  window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID) return Promise.resolve(false);
+  if (!toEmail || !toEmail.trim()) return Promise.resolve(false);
+  if (typeof window === "undefined" || !window.emailjs) return Promise.resolve(false);
+  return window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
     to_email: toEmail,
     to_name: toName,
     party_size: partySize,
     res_date: date,
     res_time: slot,
     res_area: area
-  }).catch((err) => console.error("No se pudo mandar el email de confirmaci\xF3n:", err));
+  }).then(() => true).catch((err) => {
+    console.error("No se pudo mandar el email de confirmaci\xF3n:", err);
+    return false;
+  });
 }
 function sendCancellationEmail(toEmail, toName, partySize, date, slot) {
-  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_CANCEL_TEMPLATE_ID) return;
-  if (!toEmail || !toEmail.trim()) return;
-  if (typeof window === "undefined" || !window.emailjs) return;
-  window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_CANCEL_TEMPLATE_ID, {
+  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_CANCEL_TEMPLATE_ID) return Promise.resolve(false);
+  if (!toEmail || !toEmail.trim()) return Promise.resolve(false);
+  if (typeof window === "undefined" || !window.emailjs) return Promise.resolve(false);
+  return window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_CANCEL_TEMPLATE_ID, {
     to_email: toEmail,
     to_name: toName,
     party_size: partySize,
     res_date: date,
     res_time: slot
-  }).catch((err) => console.error("No se pudo mandar el email de cancelaci\xF3n:", err));
+  }).then(() => true).catch((err) => {
+    console.error("No se pudo mandar el email de cancelaci\xF3n:", err);
+    return false;
+  });
+}
+function sendRejectionEmail(toEmail, toName, partySize, date, slot, area) {
+  if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_REJECT_TEMPLATE_ID) return Promise.resolve(false);
+  if (!toEmail || !toEmail.trim()) return Promise.resolve(false);
+  if (typeof window === "undefined" || !window.emailjs) return Promise.resolve(false);
+  return window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_REJECT_TEMPLATE_ID, {
+    to_email: toEmail,
+    to_name: toName,
+    party_size: partySize,
+    res_date: date,
+    res_time: slot,
+    res_area: area
+  }).then(() => true).catch((err) => {
+    console.error("No se pudo mandar el email de rechazo:", err);
+    return false;
+  });
+}
+function waLink(phone, text) {
+  let digits = String(phone || "").replace(/[^\d+]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("+")) digits = digits.slice(1);
+  else if (digits.startsWith("00")) digits = digits.slice(2);
+  else if (/^[6-9]\d{8}$/.test(digits)) digits = "34" + digits;
+  if (digits.length < 8) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 const INITIAL_TABLES = [
   { id: "5", capacity: 7, x: 1, y: 1, area: "Terraza" },
@@ -312,7 +344,7 @@ function formatDateEs(iso) {
   return `${d}/${m}/${y}`;
 }
 function isActiveRes(r) {
-  return !r.estado || r.estado === "activa";
+  return !r.estado || r.estado === "activa" || r.estado === "pendiente";
 }
 const NEVER_STANDALONE = /* @__PURE__ */ new Set(["Suplemento"]);
 const ZOOM_LEVELS = [0.4, 0.5, 0.55, 0.6, 1, 1.5, 2, 2.5, 3];
@@ -384,6 +416,7 @@ function findBestFit(tables, reservations, date, slot, partySize, area, adjacenc
 function statusOfTable(tableId, reservations, date, slot) {
   const res = reservations.find((r) => isActiveRes(r) && r.date === date && r.tableIds.includes(tableId));
   if (!res) return { status: "libre", reservation: null };
+  if (res.estado === "pendiente") return { status: "pendiente", reservation: res };
   return { status: res.arrivedAt ? "llegada" : "reservada", reservation: res };
 }
 function tableCenter(t) {
@@ -391,18 +424,19 @@ function tableCenter(t) {
 }
 function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
   const { x: cx, y: cy } = tableCenter(t);
-  const fill = status === "llegada" ? "#1E2E20" : status === "reservada" ? "#3A2E28" : "#20211D";
-  const stroke = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : "#4A473F";
-  const chairFill = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : "#4A473F";
+  const isPending = status === "pendiente";
+  const fill = status === "llegada" ? "#1E2E20" : status === "reservada" ? "#3A2E28" : isPending ? "#1D2733" : "#20211D";
+  const stroke = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : isPending ? "#7FA6D9" : "#4A473F";
+  const chairFill = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : isPending ? "#7FA6D9" : "#4A473F";
   let tableEl;
   let chairs = [];
   if (t.capacity <= 2) {
     const r = 30;
-    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2 });
+    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
     chairs = [{ x: cx - r - 16, y: cy }, { x: cx + r + 16, y: cy }];
   } else if (t.capacity <= 4) {
     const r = 38;
-    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2 });
+    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
     chairs = [
       { x: cx, y: cy - r - 16 },
       { x: cx, y: cy + r + 16 },
@@ -411,7 +445,7 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
     ];
   } else if (t.capacity <= 6) {
     const w = 132, h = 56;
-    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2 });
+    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
     chairs = [
       { x: cx - 36, y: cy - h / 2 - 16 },
       { x: cx, y: cy - h / 2 - 16 },
@@ -422,7 +456,7 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
     ];
   } else {
     const w = 172, h = 62;
-    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2 });
+    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
     chairs = [
       { x: cx - 60, y: cy - h / 2 - 16 },
       { x: cx - 20, y: cy - h / 2 - 16 },
@@ -467,6 +501,7 @@ function App() {
   const [dbStatus, setDbStatus] = useState("cargando");
   const [zoneSettings, setZoneSettings] = useState({ Sala: true, Terraza: true });
   const [reservasPausadas, setReservasPausadas] = useState(false);
+  const [aprobacionManual, setAprobacionManual] = useState(false);
   const [clients, setClients] = useState([]);
   const [waitlist, setWaitlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -543,6 +578,62 @@ function App() {
     playAlertSound("nueva");
     showSystemNotification("\u{1F514} Reservas nuevas", `${count} reservas nuevas`, "new-summary");
   };
+  const decidingRef = React.useRef(/* @__PURE__ */ new Set());
+  const pushNotice = (text, links, sticky) => {
+    const id = `aviso-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setAlerts((prev) => [{ id, kind: "aviso", text, links: links || [] }, ...prev].slice(0, 6));
+    if (!sticky) setTimeout(() => setAlerts((prev) => prev.filter((a) => a.id !== id)), 9e3);
+  };
+  const raisePendingAlert = (r, quiet) => {
+    var _a;
+    const area = (_a = tablesRef.current.find((t) => t.id === r.tableIds[0])) == null ? void 0 : _a.area;
+    const text = `Solicitud de reserva: ${r.name} \u2014 ${r.partySize} personas, ${r.slot} (${formatDateEs(r.date)})${area ? ` \xB7 ${area}` : ""} \xB7 mesa${r.tableIds.length > 1 ? "s" : ""} ${r.tableIds.join(" + ")}. \xBFLa confirmas?`;
+    setAlerts((prev) => [{ id: `pend-${r.id}`, kind: "pendiente", text, res: r }, ...prev.filter((a) => a.id !== `pend-${r.id}`)].slice(0, 6));
+    if (!quiet) {
+      playAlertSound("nueva");
+      showSystemNotification("\u{1F514} Reserva pendiente de confirmar", `${r.name} \u2014 ${r.partySize} pers., ${r.slot} (${formatDateEs(r.date)})`, `pend-${r.id}`);
+    }
+  };
+  const decidePending = async (res, decision) => {
+    var _a;
+    if (PUBLIC_MODE || !res) return;
+    if (decidingRef.current.has(res.id)) return;
+    decidingRef.current.add(res.id);
+    const aprobar = decision === "confirmar";
+    const nuevoEstado = aprobar ? "activa" : "rechazada";
+    const quitarAviso = () => setAlerts((prev) => prev.filter((a) => a.id !== `pend-${res.id}`));
+    try {
+      const updated = await sb(`reservas?id=eq.${res.id}&estado=eq.pendiente`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado: nuevoEstado })
+      });
+      quitarAviso();
+      if (!updated || updated.length === 0) {
+        pushNotice(`La reserva de ${res.name} ya estaba resuelta (por otro dispositivo o por el propio cliente).`);
+        return;
+      }
+      setReservations((prev) => prev.map((r) => r.id === res.id ? { ...r, estado: nuevoEstado } : r));
+      const area = ((_a = tablesRef.current.find((t) => t.id === res.tableIds[0])) == null ? void 0 : _a.area) || "";
+      const emailOk = aprobar ? await sendConfirmationEmail(res.email, res.name, res.partySize, res.date, res.slot, area) : await sendRejectionEmail(res.email, res.name, res.partySize, res.date, res.slot, area);
+      const titulo = aprobar ? `\u2713 Reserva de ${res.name} confirmada.` : `Reserva de ${res.name} rechazada.`;
+      if (emailOk) {
+        pushNotice(`${titulo} Email enviado al cliente.`);
+      } else {
+        const fecha = formatDateEs(res.date);
+        const mensaje = aprobar ? `Hola ${res.name}, te confirmamos tu reserva para ${res.partySize} personas el ${fecha} a las ${res.slot}. \xA1Te esperamos! \u2014 ${BRAND_LOGO_ALT}` : `Hola ${res.name}, lo sentimos: no podemos confirmar tu reserva para el ${fecha} a las ${res.slot}. Si quieres, dinos otro d\xEDa u hora y lo miramos. \u2014 ${BRAND_LOGO_ALT}`;
+        const links = [];
+        const wa = waLink(res.phone, mensaje);
+        if (wa) links.push({ label: "\u{1F4AC} Avisar por WhatsApp", href: wa });
+        if (res.phone) links.push({ label: "\u{1F4DE} Llamar", href: `tel:${res.phone}` });
+        pushNotice(`${titulo} No se ha podido avisar por email${res.email ? "" : " (no dej\xF3 email)"}: av\xEDsale t\xFA.`, links, true);
+      }
+    } catch (err) {
+      console.error("No se pudo guardar la decisi\xF3n:", err);
+      pushNotice("No se pudo guardar la decisi\xF3n (sin conexi\xF3n). Int\xE9ntalo de nuevo.");
+    } finally {
+      decidingRef.current.delete(res.id);
+    }
+  };
   const reservationSig = (r) => `${(r.name || "").trim().toLowerCase()}|${(r.phone || "").trim()}|${r.date}|${r.slot}`;
   const registerOwnReservation = (r) => {
     ownSignatures.current.set(reservationSig(r), Date.now() + 3e4);
@@ -554,18 +645,24 @@ function App() {
     return !!expires && expires > Date.now();
   };
   const handleNewReservations = (list) => {
-    const fresh = [];
+    const normales = [];
+    const pendientes = [];
     list.forEach((r) => {
       if (seenReservationIds.current.has(r.id)) return;
       seenReservationIds.current.add(r.id);
       if (PUBLIC_MODE) return;
+      if (r.estado === "pendiente") {
+        pendientes.push(r);
+        return;
+      }
       if (r.estado !== "activa") return;
       if (consumeOwnSignature(r)) return;
-      fresh.push(r);
+      normales.push(r);
     });
-    if (fresh.length === 0) return;
-    if (fresh.length > 3) raiseNewReservationsSummary(fresh.length);
-    else fresh.forEach((r) => raiseNewReservationAlert(r));
+    pendientes.forEach((r, i) => raisePendingAlert(r, i > 0));
+    if (normales.length === 0) return;
+    if (normales.length > 3) raiseNewReservationsSummary(normales.length);
+    else normales.forEach((r) => raiseNewReservationAlert(r));
   };
   const refreshReservations = async (isFirstLoad) => {
     const reservas = await sb("reservas?select=*");
@@ -587,6 +684,9 @@ function App() {
     } else {
       handleNewReservations(mapped.filter((r) => !seenReservationIds.current.has(r.id)));
     }
+    setAlerts(
+      (prev) => prev.filter((a) => a.kind !== "pendiente" || !mapped.some((r) => r.id === a.res.id && r.estado !== "pendiente"))
+    );
   };
   useEffect(() => {
     (async () => {
@@ -620,6 +720,7 @@ function App() {
         if (config && config[0]) {
           setZoneSettings({ Sala: !!config[0].sala_activa, Terraza: !!config[0].terraza_activa });
           setReservasPausadas(!!config[0].reservas_pausadas);
+          setAprobacionManual(!!config[0].aprobacion_manual);
         }
         if (clientes) {
           setClients(clientes.map((c) => ({ id: c.id, name: c.nombre, phone: c.telefono, postalCode: c.codigo_postal, allergies: c.alergias, preferredTable: c.mesa_preferida, birthday: c.cumpleanos, notes: c.notas })));
@@ -652,9 +753,13 @@ function App() {
     const channel = client.channel("cambios-taracea").on("postgres_changes", { event: "*", schema: "public", table: "reservas" }, (payload) => {
       if (payload.eventType === "DELETE") {
         setReservations((prev) => prev.filter((r2) => r2.id !== payload.old.id));
+        setAlerts((prev) => prev.filter((a) => a.id !== `pend-${payload.old.id}`));
         return;
       }
       const r = mapReserva(payload.new);
+      if (r.estado !== "pendiente") {
+        setAlerts((prev) => prev.some((a) => a.id === `pend-${r.id}`) ? prev.filter((a) => a.id !== `pend-${r.id}`) : prev);
+      }
       setReservations((prev) => {
         const exists = prev.some((x) => x.id === r.id);
         return exists ? prev.map((x) => x.id === r.id ? r : x) : [...prev, r];
@@ -711,6 +816,17 @@ function App() {
       console.error("No se pudo guardar el ajuste de pausa general:", err);
     }
   };
+  const toggleAprobacionManual = async () => {
+    const next = !aprobacionManual;
+    setAprobacionManual(next);
+    try {
+      await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ aprobacion_manual: next }) });
+    } catch (err) {
+      console.error("No se pudo guardar el ajuste de confirmar reservas a mano:", err);
+      setAprobacionManual(!next);
+      pushNotice("No se pudo guardar el ajuste. \xBFHas ejecutado en Supabase el SQL de \xABconfirmar reservas a mano\xBB?", [], true);
+    }
+  };
   const handleClientCancel = async (reservationId) => {
     const res = reservations.find((r) => r.id === reservationId);
     setReservations((prev) => prev.map((r) => r.id === reservationId ? { ...r, estado: "cancelada", cancelReason: "cliente" } : r));
@@ -751,6 +867,12 @@ function App() {
   const handleConfirm = async () => {
     if (form.website && form.website.trim()) return;
     setSaving(true);
+    let pendiente = aprobacionManual;
+    try {
+      const cfg = await sb("configuracion?select=aprobacion_manual&id=eq.1");
+      if (cfg && cfg[0]) pendiente = !!cfg[0].aprobacion_manual;
+    } catch (err) {
+    }
     const payload = {
       nombre: form.name,
       telefono: form.phone,
@@ -760,12 +882,13 @@ function App() {
       fecha: form.date,
       mesa_ids: pendingSuggestion.tableIds
     };
+    if (pendiente) payload.estado = "pendiente";
     try {
       const [row] = await sb("reservas", { method: "POST", body: JSON.stringify(payload) });
-      const newRes = { id: row.id, name: row.nombre, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids, area: form.area };
+      const newRes = { id: row.id, name: row.nombre, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids, area: form.area, estado: pendiente ? "pendiente" : "activa" };
       setReservations((prev) => [...prev, newRes]);
       setConfirmed(newRes);
-      sendConfirmationEmail(form.email, form.name, form.partySize, form.date, form.slot, form.area);
+      if (!pendiente) sendConfirmationEmail(form.email, form.name, form.partySize, form.date, form.slot, form.area);
     } catch (err) {
       console.error(err);
       const newRes = { id: `local-${Date.now()}`, name: form.name, partySize: Number(form.partySize), slot: form.slot, date: form.date, tableIds: pendingSuggestion.tableIds, area: form.area };
@@ -777,6 +900,10 @@ function App() {
       setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area, website: "" });
     }
   };
+  const pendingReservations = useMemo(
+    () => reservations.filter((r) => r.estado === "pendiente" && r.date >= todayISO()).sort((a, b) => `${a.date} ${a.slot}`.localeCompare(`${b.date} ${b.slot}`)),
+    [reservations]
+  );
   const slotReservations = useMemo(
     () => reservations.filter((r) => isActiveRes(r) && r.slot === selectedSlot && r.date === selectedDate),
     [reservations, selectedSlot, selectedDate]
@@ -786,7 +913,16 @@ function App() {
           filter: invert(1);
           cursor: pointer;
         }
-      `), alerts.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, alerts.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: a.kind === "nueva" ? styles.alertBannerNew : styles.alertBanner }, /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, a.kind === "nueva" ? "\u{1F514}" : "\u26A0\uFE0F"), /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
+      `), alerts.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, alerts.map((a) => /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      key: a.id,
+      style: a.kind === "nueva" ? styles.alertBannerNew : a.kind === "pendiente" ? styles.alertBannerPending : a.kind === "aviso" ? styles.alertBannerInfo : styles.alertBanner
+    },
+    /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, a.kind === "nueva" ? "\u{1F514}" : a.kind === "pendiente" ? "\u23F3" : a.kind === "aviso" ? "\u2139\uFE0F" : "\u26A0\uFE0F"),
+    /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), a.kind === "pendiente" && /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => decidePending(a.res, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => decidePending(a.res, "rechazar") }, "\u2715 Rechazar")), a.links && a.links.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, a.links.map((l) => /* @__PURE__ */ React.createElement("a", { key: l.label, href: l.href, target: "_blank", rel: "noreferrer", style: styles.alertLink }, l.label)))),
+    /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")
+  ))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
     "span",
     {
       style: {
@@ -852,7 +988,9 @@ function App() {
       waitlist,
       setWaitlist,
       adjacency,
-      onOwnReservation: registerOwnReservation
+      onOwnReservation: registerOwnReservation,
+      pendingReservations,
+      onDecidePending: decidePending
     }
   ) : /* @__PURE__ */ React.createElement(
     AdminView,
@@ -861,6 +999,8 @@ function App() {
       onToggleZone: toggleZone,
       reservasPausadas,
       onToggleReservasPausadas: toggleReservasPausadas,
+      aprobacionManual,
+      onToggleAprobacionManual: toggleAprobacionManual,
       tables,
       setTables,
       reservations,
@@ -880,7 +1020,7 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
     return /* @__PURE__ */ React.createElement(ClientCancelFlow, { reservations, onCancel: onClientCancel, onBack: () => setMode("reservar") });
   }
   if (confirmed) {
-    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmIcon }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u2713")), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, "Reserva confirmada"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, confirmed.name, ", tu mesa para ", confirmed.partySize, " personas a las ", confirmed.slot, " est\xE1 lista."), /* @__PURE__ */ React.createElement("p", { style: styles.confirmMeta }, "Mesa", confirmed.tableIds.length > 1 ? "s" : "", " asignada", confirmed.tableIds.length > 1 ? "s" : "", ": ", confirmed.tableIds.join(" + "), " \xB7 ", confirmed.area)));
+    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmIcon }, confirmed.estado === "pendiente" ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u23F3") : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u2713")), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, confirmed.estado === "pendiente" ? "Solicitud recibida" : "Reserva confirmada"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, confirmed.estado === "pendiente" ? `${confirmed.name}, hemos recibido tu solicitud para ${confirmed.partySize} personas a las ${confirmed.slot}. El restaurante la revisar\xE1 y te responder\xE1 en breve.` : `${confirmed.name}, tu mesa para ${confirmed.partySize} personas a las ${confirmed.slot} est\xE1 lista.`), confirmed.estado !== "pendiente" && /* @__PURE__ */ React.createElement("p", { style: styles.confirmMeta }, "Mesa", confirmed.tableIds.length > 1 ? "s" : "", " asignada", confirmed.tableIds.length > 1 ? "s" : "", ": ", confirmed.tableIds.join(" + "), " \xB7 ", confirmed.area)));
   }
   return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Reserva tu mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "El sistema asigna o combina mesas autom\xE1ticamente seg\xFAn el grupo."), /* @__PURE__ */ React.createElement(
     "input",
@@ -1031,7 +1171,7 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
 }
 const ADMIN_PASSWORD = "taracea2026";
-function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
+function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
   const [unlocked, setUnlocked] = useState(false);
   const [pass, setPass] = useState("");
   const [wrongPass, setWrongPass] = useState(false);
@@ -1076,9 +1216,9 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
 }
-function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas }) {
+function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -1093,7 +1233,14 @@ function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleRese
       style: { ...styles.zoneToggle, ...reservasPausadas ? { background: "#8B4A3E" } : styles.zoneToggleOff }
     },
     /* @__PURE__ */ React.createElement("span", { style: { ...styles.zoneToggleDot, ...reservasPausadas ? styles.zoneToggleDotOn : {} } })
-  )), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 10 } }, "Con esto activado, cualquiera que intente reservar en esta web ver\xE1 un aviso de que no hay espacio disponible online, con el tel\xE9fono de reservas. Solo afecta a esta aplicaci\xF3n \u2014 no a tu TPV, tel\xE9fono u otras plataformas."), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 20 } }, "Al cerrar una zona, los clientes solo ver\xE1n la otra opci\xF3n en el formulario de reserva. Las mesas y reservas ya existentes de esa zona no se borran, solo se oculta para nuevas reservas.")));
+  )), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 10 } }, "Con esto activado, cualquiera que intente reservar en esta web ver\xE1 un aviso de que no hay espacio disponible online, con el tel\xE9fono de reservas. Solo afecta a esta aplicaci\xF3n \u2014 no a tu TPV, tel\xE9fono u otras plataformas."), /* @__PURE__ */ React.createElement("div", { style: { ...styles.zoneRow, marginTop: 26, background: aprobacionManual ? "#1D2733" : "#151310", borderColor: aprobacionManual ? "#7FA6D9" : "#2A2822" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "Confirmar reservas a mano"), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, aprobacionManual ? "Las reservas de clientes quedan pendientes hasta que las confirmes" : "Las reservas de clientes entran solas, ya confirmadas")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: onToggleAprobacionManual,
+      style: { ...styles.zoneToggle, ...aprobacionManual ? styles.zoneToggleOn : styles.zoneToggleOff }
+    },
+    /* @__PURE__ */ React.createElement("span", { style: { ...styles.zoneToggleDot, ...aprobacionManual ? styles.zoneToggleDotOn : {} } })
+  )), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 10 } }, "Con esto activado, cuando un cliente reserve te saldr\xE1 un aviso con \xABConfirmar\xBB y \xABRechazar\xBB. Al confirmar, el cliente recibe el email de confirmaci\xF3n; al rechazar, el de rechazo. Si ese email no est\xE1 configurado, la app te da un bot\xF3n para avisarle por WhatsApp. Mientras est\xE9 pendiente, la mesa queda bloqueada para que nadie m\xE1s la reserve. Las reservas que met\xE1is vosotros a mano entran siempre confirmadas."), /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 20 } }, "Al cerrar una zona, los clientes solo ver\xE1n la otra opci\xF3n en el formulario de reserva. Las mesas y reservas ya existentes de esa zona no se borran, solo se oculta para nuevas reservas.")));
 }
 const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Mi\xE9rcoles", "Jueves", "Viernes", "S\xE1bado"];
@@ -1432,7 +1579,7 @@ function AdminReports({ reservations }) {
     reservations.forEach((r) => {
       if (!r.date) return;
       const [y, m] = r.date.split("-").map(Number);
-      if (y === year) counts[m - 1] += 1;
+      if (y === year && r.estado !== "pendiente" && r.estado !== "rechazada") counts[m - 1] += 1;
     });
     return counts;
   }, [reservations, year]);
@@ -1853,8 +2000,12 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending }) {
   const [selectedTable, setSelectedTable] = useState(null);
+  const decideAndClose = async (res, decision) => {
+    await onDecidePending(res, decision);
+    setSelectedTable(null);
+  };
   const [area, setArea] = useState("Sala");
   const [mode, setMode] = useState("none");
   const [showOccupancy, setShowOccupancy] = useState(false);
@@ -2038,7 +2189,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       }
     ));
   }
-  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(PendingPanel, { pending: pendingReservations || [], tables, onDecide: decideAndClose }), /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: a,
@@ -2176,7 +2327,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
         }
       );
     })
-  )), /* @__PURE__ */ React.createElement("div", { style: styles.legend }, /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#20211D", border: "1px solid #4A473F" } }), " Libre"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#3A2E28", border: "1px solid #C9A15A" } }), " Reservada"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#C9A15A", opacity: 0.4, border: "none" } }), " Mesas combinadas"), /* @__PURE__ */ React.createElement("span", { style: styles.legendBrand }, "AKTEC Manager"))), /* @__PURE__ */ React.createElement("div", { style: styles.sidePanel }, mode === "manual" ? /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { style: styles.legend }, /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#20211D", border: "1px solid #4A473F" } }), " Libre"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#3A2E28", border: "1px solid #C9A15A" } }), " Reservada"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#1D2733", border: "1px dashed #7FA6D9" } }), " Pendiente de confirmar"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#C9A15A", opacity: 0.4, border: "none" } }), " Mesas combinadas"), /* @__PURE__ */ React.createElement("span", { style: styles.legendBrand }, "AKTEC Manager"))), /* @__PURE__ */ React.createElement("div", { style: styles.sidePanel }, mode === "manual" ? /* @__PURE__ */ React.createElement(
     ManualReservationPanel,
     {
       areaTables,
@@ -2193,7 +2344,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       onConfirm: handleManualConfirm,
       onUseSuggestion: (fit) => setManualSelected(fit.tableIds)
     }
-  ) : mode === "ficha" ? /* @__PURE__ */ React.createElement(ClientProfilePanel, { clients, setClients }) : mode === "espera" ? /* @__PURE__ */ React.createElement(WaitlistPanel, { waitlist, setWaitlist }) : selectedTable ? /* @__PURE__ */ React.createElement(TableDetail, { table: selectedTable, now, reservations, clients, onMarkArrived: handleMarkArrived, onFinish: handleFinishReservation, onCancel: handleCancelReservation, onNoShow: handleNoShow }) : /* @__PURE__ */ React.createElement(ReservationList, { slotReservations, selectedSlot }))));
+  ) : mode === "ficha" ? /* @__PURE__ */ React.createElement(ClientProfilePanel, { clients, setClients }) : mode === "espera" ? /* @__PURE__ */ React.createElement(WaitlistPanel, { waitlist, setWaitlist }) : selectedTable ? /* @__PURE__ */ React.createElement(TableDetail, { table: selectedTable, now, reservations, clients, onDecide: decideAndClose, onMarkArrived: handleMarkArrived, onFinish: handleFinishReservation, onCancel: handleCancelReservation, onNoShow: handleNoShow }) : /* @__PURE__ */ React.createElement(ReservationList, { slotReservations, selectedSlot }))));
 }
 function ClientProfilePanel({ clients, setClients }) {
   const [form, setForm] = useState({ name: "", phone: "", postalCode: "", allergies: "", preferredTable: "", birthday: "", notes: "" });
@@ -2355,13 +2506,21 @@ function ManualReservationPanel({
     manualSaving ? "Guardando\u2026" : "Guardar reserva manual"
   ), manualMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, manualMsg));
 }
-function TableDetail({ table, now, reservations, clients, onMarkArrived, onFinish, onCancel, onNoShow }) {
+function PendingPanel({ pending, tables, onDecide }) {
+  if (!pending || pending.length === 0) return null;
+  return /* @__PURE__ */ React.createElement("div", { style: styles.pendingPanel }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingTitle }, "\u23F3 Reservas pendientes de confirmar (", pending.length, ")"), pending.map((r) => {
+    var _a;
+    const area = (_a = tables.find((t) => t.id === r.tableIds[0])) == null ? void 0 : _a.area;
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 180 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, formatDateEs(r.date), " \xB7 ", r.slot, area ? ` \xB7 ${area}` : "", " \xB7 mesa", r.tableIds.length > 1 ? "s" : "", " ", r.tableIds.join(" + "), r.phone ? ` \xB7 ${r.phone}` : "")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")));
+  }));
+}
+function TableDetail({ table, now, reservations, clients, onDecide, onMarkArrived, onFinish, onCancel, onNoShow }) {
   var _a, _b;
   const [askingCancelReason, setAskingCancelReason] = useState(false);
   const arrivedAt = (_a = table.reservation) == null ? void 0 : _a.arrivedAt;
   const elapsedMin = arrivedAt ? Math.max(0, Math.round((now - new Date(arrivedAt).getTime()) / 6e4)) : null;
   const phone = (_b = table.reservation) == null ? void 0 : _b.phone;
-  const visitCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim()).length : 0;
+  const visitCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim() && r.estado !== "rechazada").length : 0;
   const noShowCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim() && r.estado === "no_presentado").length : 0;
   const lateCancelCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim() && r.estado === "cancelada" && r.cancelReason === "cliente").length : 0;
   const clientCard = phone ? (clients || []).find((c) => c.phone && c.phone.trim() === phone.trim()) : null;
@@ -2374,7 +2533,7 @@ function TableDetail({ table, now, reservations, clients, onMarkArrived, onFinis
     onCancel(table.reservation.id, table.id, motivo);
     setAskingCancelReason(false);
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Mesa ", table.id), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Capacidad base: ", table.capacity, " personas"), table.status === "libre" ? /* @__PURE__ */ React.createElement("div", { style: styles.freeTag }, "Libre en este turno") : /* @__PURE__ */ React.createElement("div", { style: styles.reservedBlock }, /* @__PURE__ */ React.createElement("p", { style: styles.resName }, table.reservation.name, visitCount > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.visitCount }, " (te ha visitado ", visitCount, " ", visitCount === 1 ? "vez" : "veces", ")")), /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, table.reservation.partySize, " personas \xB7 ", table.reservation.slot), table.reservation.phone && /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, "Tel: ", table.reservation.phone), (noShowCount > 0 || lateCancelCount >= 2) && /* @__PURE__ */ React.createElement("div", { style: styles.riskBox }, "\u26A0\uFE0F ", noShowCount > 0 && `${noShowCount} no presentado${noShowCount > 1 ? "s" : ""} antes`, noShowCount > 0 && lateCancelCount >= 2 && " \xB7 ", lateCancelCount >= 2 && `${lateCancelCount} cancelaciones tarde`, " ", "\u2014 conviene llamar a confirmar"), clientCard && (clientCard.allergies || clientCard.preferredTable || clientCard.notes) && /* @__PURE__ */ React.createElement("div", { style: styles.clientCardBox }, clientCard.allergies && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u26A0\uFE0F Alergias: ", clientCard.allergies), clientCard.preferredTable && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u2605 Mesa preferida: ", clientCard.preferredTable), clientCard.notes && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u{1F4DD} ", clientCard.notes)), table.reservation.tableIds.length > 1 && /* @__PURE__ */ React.createElement("p", { style: styles.resCombined }, "Combinada con: ", table.reservation.tableIds.filter((id) => id !== table.id).join(", ")), arrivedAt ? /* @__PURE__ */ React.createElement("div", { style: styles.arrivedBox }, /* @__PURE__ */ React.createElement("span", { style: styles.arrivedCheck }, "\u2713 Ha llegado"), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, elapsedMin < 60 ? `${elapsedMin} min sentados` : `${Math.floor(elapsedMin / 60)} h ${elapsedMin % 60} min sentados`)) : /* @__PURE__ */ React.createElement("button", { style: styles.arrivedBtn, onClick: () => onMarkArrived(table.reservation.id) }, "\u2713 Marcar como llegada"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Mesa ", table.id), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Capacidad base: ", table.capacity, " personas"), table.status === "libre" ? /* @__PURE__ */ React.createElement("div", { style: styles.freeTag }, "Libre en este turno") : /* @__PURE__ */ React.createElement("div", { style: styles.reservedBlock }, /* @__PURE__ */ React.createElement("p", { style: styles.resName }, table.reservation.name, visitCount > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.visitCount }, " (te ha visitado ", visitCount, " ", visitCount === 1 ? "vez" : "veces", ")")), /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, table.reservation.partySize, " personas \xB7 ", table.reservation.slot), table.reservation.phone && /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, "Tel: ", table.reservation.phone), (noShowCount > 0 || lateCancelCount >= 2) && /* @__PURE__ */ React.createElement("div", { style: styles.riskBox }, "\u26A0\uFE0F ", noShowCount > 0 && `${noShowCount} no presentado${noShowCount > 1 ? "s" : ""} antes`, noShowCount > 0 && lateCancelCount >= 2 && " \xB7 ", lateCancelCount >= 2 && `${lateCancelCount} cancelaciones tarde`, " ", "\u2014 conviene llamar a confirmar"), clientCard && (clientCard.allergies || clientCard.preferredTable || clientCard.notes) && /* @__PURE__ */ React.createElement("div", { style: styles.clientCardBox }, clientCard.allergies && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u26A0\uFE0F Alergias: ", clientCard.allergies), clientCard.preferredTable && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u2605 Mesa preferida: ", clientCard.preferredTable), clientCard.notes && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u{1F4DD} ", clientCard.notes)), table.reservation.tableIds.length > 1 && /* @__PURE__ */ React.createElement("p", { style: styles.resCombined }, "Combinada con: ", table.reservation.tableIds.filter((id) => id !== table.id).join(", ")), table.reservation.estado === "pendiente" ? /* @__PURE__ */ React.createElement("div", { style: styles.pendingPanel }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingTitle }, "\u23F3 Pendiente de confirmar"), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(table.reservation, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(table.reservation, "rechazar") }, "\u2715 Rechazar"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, arrivedAt ? /* @__PURE__ */ React.createElement("div", { style: styles.arrivedBox }, /* @__PURE__ */ React.createElement("span", { style: styles.arrivedCheck }, "\u2713 Ha llegado"), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, elapsedMin < 60 ? `${elapsedMin} min sentados` : `${Math.floor(elapsedMin / 60)} h ${elapsedMin % 60} min sentados`)) : /* @__PURE__ */ React.createElement("button", { style: styles.arrivedBtn, onClick: () => onMarkArrived(table.reservation.id) }, "\u2713 Marcar como llegada"), /* @__PURE__ */ React.createElement(
     "button",
     {
       style: styles.finishBtn,
@@ -2396,7 +2555,7 @@ function TableDetail({ table, now, reservations, clients, onMarkArrived, onFinis
       }
     },
     "\u{1F6AB} No presentado"
-  )));
+  ))));
 }
 function ReservationList({ slotReservations, selectedSlot }) {
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Reservas \xB7 ", selectedSlot), slotReservations.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Sin reservas en este turno todav\xEDa.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, slotReservations.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.name), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, r.partySize, " personas")), /* @__PURE__ */ React.createElement("div", { style: styles.resRowTables }, r.tableIds.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, style: styles.tableTag }, id)), /* @__PURE__ */ React.createElement("span", { style: { color: "#6B6459" } }, "\u203A"))))), /* @__PURE__ */ React.createElement("p", { style: styles.hint }, "Toca una mesa en el plano para ver o editar su asignaci\xF3n."));
@@ -2436,6 +2595,16 @@ const styles = {
   clockBadge: { fontFamily: "system-ui, sans-serif", fontSize: 10, marginLeft: 10, color: "#9C9488", letterSpacing: 0.2 },
   notifBtn: { fontFamily: "system-ui, sans-serif", fontSize: 10, marginLeft: 10, background: "#C9A15A", color: "#1C1A17", border: "none", borderRadius: 12, padding: "4px 10px", cursor: "pointer", fontWeight: 600 },
   alertStack: { position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 1e3, display: "flex", flexDirection: "column", gap: 8, width: "min(92%, 480px)" },
+  alertBannerPending: { display: "flex", alignItems: "flex-start", gap: 10, background: "#1D2733", border: "1px solid #7FA6D9", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
+  alertBannerInfo: { display: "flex", alignItems: "flex-start", gap: 10, background: "#242018", border: "1px solid #6B6459", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
+  alertActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
+  alertBtnOk: { background: "#3E7A4C", border: "none", color: "#F2EDE6", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif" },
+  alertBtnNo: { background: "#8B4A3E", border: "none", color: "#F2EDE6", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif" },
+  alertLink: { background: "#2A2822", border: "1px solid #4A473F", color: "#E8D9B5", borderRadius: 8, padding: "7px 12px", fontSize: 13, textDecoration: "none", fontFamily: "system-ui, sans-serif" },
+  pendingPanel: { background: "#1A222C", border: "1px solid #7FA6D9", borderRadius: 12, padding: "12px 14px", marginBottom: 14 },
+  pendingTitle: { fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 600, color: "#BBD1EE", margin: "0 0 8px 0" },
+  pendingRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid #2B3949", flexWrap: "wrap" },
+  pendingBtns: { display: "flex", gap: 8 },
   alertBannerNew: { display: "flex", alignItems: "flex-start", gap: 10, background: "#1B2A1E", border: "1px solid #5E8F66", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
   alertBanner: { display: "flex", alignItems: "flex-start", gap: 10, background: "#3A1616", border: "1px solid #B15347", borderRadius: 10, padding: "12px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" },
   alertIcon: { fontSize: 18, lineHeight: 1 },
