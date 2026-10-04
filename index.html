@@ -160,6 +160,76 @@ function waLink(phone, text) {
   if (digits.length < 8) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
+function phoneKey(p) {
+  const d = String(p || "").replace(/\D/g, "");
+  return d.length >= 8 ? d.slice(-9) : "";
+}
+function reservationBadges(res, reservations, clients) {
+  const badges = [];
+  const key = phoneKey(res.phone);
+  if (!key) return badges;
+  const card = (clients || []).find((c) => phoneKey(c.phone) === key);
+  const same = reservations.filter((r) => phoneKey(r.phone) === key);
+  const visits = same.filter((r) => (r.estado || "activa") === "activa" || r.estado === "finalizada").length;
+  if (visits >= 3) badges.push({ key: "vip", icon: "\u2B50", label: `Cliente habitual (${visits} visitas)` });
+  if (card && card.birthday && res.date && String(card.birthday).slice(5, 10) === String(res.date).slice(5, 10)) {
+    badges.push({ key: "bday", icon: "\u{1F382}", label: "Cumplea\xF1os" });
+  }
+  if (card && card.allergies && card.allergies.trim()) {
+    badges.push({ key: "allergy", icon: "\u26A0\uFE0F", label: `Alergias: ${card.allergies.trim()}` });
+  }
+  const noShows = same.filter((r) => r.estado === "no_presentado").length;
+  const lateCancels = same.filter((r) => r.estado === "cancelada" && r.cancelReason === "cliente").length;
+  if (noShows > 0 || lateCancels >= 2) {
+    const parts = [];
+    if (noShows > 0) parts.push(`${noShows} no presentado${noShows > 1 ? "s" : ""}`);
+    if (lateCancels >= 2) parts.push(`${lateCancels} cancelaciones tarde`);
+    badges.push({ key: "risk", icon: "\u{1F6A9}", label: parts.join(" \xB7 ") });
+  }
+  const pref = card && card.preferredTable && card.preferredTable.trim();
+  const notes = card && card.notes && card.notes.trim();
+  if (pref || notes) {
+    badges.push({ key: "note", icon: "\u{1F4DD}", label: [pref ? `mesa preferida ${pref}` : "", notes || ""].filter(Boolean).join(" \xB7 ") });
+  }
+  return badges;
+}
+const BOOK_FILTERS = [
+  { id: "todas", label: "Todas" },
+  { id: "proximas", label: "Pr\xF3ximas" },
+  { id: "enmesa", label: "En mesa" },
+  { id: "terminadas", label: "Terminadas" },
+  { id: "canceladas", label: "Canceladas" }
+];
+function bookStatus(r) {
+  const e = r.estado || "activa";
+  if (e === "pendiente") return { key: "pendiente", label: "Pendiente", color: "#7FA6D9", group: "proximas" };
+  if (e === "activa") {
+    return r.arrivedAt ? { key: "enmesa", label: "En mesa", color: "#4C9A5C", group: "enmesa" } : { key: "reservada", label: "Reservada", color: "#C9A15A", group: "proximas" };
+  }
+  if (e === "finalizada") return { key: "terminada", label: "Terminada", color: "#9C9488", group: "terminadas" };
+  if (e === "cancelada") return { key: "cancelada", label: r.cancelReason === "cliente" ? "Cancel\xF3 el cliente" : "Cancelada", color: "#B15347", group: "canceladas" };
+  if (e === "no_presentado") return { key: "nopresentada", label: "No se present\xF3", color: "#B15347", group: "canceladas" };
+  if (e === "rechazada") return { key: "rechazada", label: "Rechazada", color: "#B15347", group: "canceladas" };
+  return { key: e, label: e, color: "#9C9488", group: "todas" };
+}
+function computeBookStats(dayRes) {
+  const valid = dayRes.filter((r) => {
+    const e = r.estado || "activa";
+    return e === "activa" || e === "pendiente" || e === "finalizada";
+  });
+  return {
+    reservas: valid.length,
+    comensales: valid.reduce((s, r) => s + (Number(r.partySize) || 0), 0),
+    mesas: new Set(valid.flatMap((r) => r.tableIds || [])).size
+  };
+}
+function filterBook(dayRes, filter) {
+  if (filter === "todas") return dayRes;
+  return dayRes.filter((r) => bookStatus(r).group === filter);
+}
+function sortBook(dayRes) {
+  return dayRes.slice().sort((a, b) => String(a.slot).localeCompare(String(b.slot)) || String(a.name).localeCompare(String(b.name)));
+}
 const DISPOSABLE_EMAIL_DOMAINS = /* @__PURE__ */ new Set([
   "mailinator.com",
   "yopmail.com",
@@ -539,7 +609,7 @@ function statusOfTable(tableId, reservations, date, slot) {
 function tableCenter(t) {
   return { x: t.x * 105 + 80, y: t.y * 115 + 70 };
 }
-function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
+function TableShape({ t, status, isSelected, editMode, onClick, onDragStart, badges }) {
   const { x: cx, y: cy } = tableCenter(t);
   const isPending = status === "pendiente";
   const fill = status === "llegada" ? "#1E2E20" : status === "reservada" ? "#3A2E28" : isPending ? "#1D2733" : "#20211D";
@@ -596,6 +666,17 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart }) {
     tableEl,
     /* @__PURE__ */ React.createElement("text", { x: cx, y: cy - 3, textAnchor: "middle", fontSize: "17", fontWeight: "700", fill: "#F2EDE6", fontFamily: "system-ui, sans-serif" }, t.id),
     /* @__PURE__ */ React.createElement("text", { x: cx, y: cy + 15, textAnchor: "middle", fontSize: "12", fill: "#9C9488", fontFamily: "system-ui, sans-serif" }, t.capacity, "p"),
+    badges && badges.length > 0 && /* @__PURE__ */ React.createElement(
+      "text",
+      {
+        x: t.capacity <= 2 ? cx + 24 : t.capacity <= 4 ? cx + 30 : cx + (t.capacity <= 6 ? 60 : 80),
+        y: t.capacity <= 2 ? cy - 24 : t.capacity <= 4 ? cy - 30 : cy - (t.capacity <= 6 ? 13 : 16),
+        textAnchor: t.capacity <= 4 ? "middle" : "end",
+        fontSize: "13",
+        fontFamily: "system-ui, sans-serif"
+      },
+      badges.slice(0, 3).join("")
+    ),
     isSelected && /* @__PURE__ */ React.createElement("circle", { cx, cy, r: t.capacity <= 2 ? 50 : t.capacity <= 4 ? 58 : 100, fill: "none", stroke: "#C9A15A", strokeWidth: 2, strokeDasharray: "4 3" }),
     editMode && /* @__PURE__ */ React.createElement("circle", { cx, cy, r: t.capacity <= 2 ? 42 : t.capacity <= 4 ? 48 : 80, fill: "none", stroke: "#6B6459", strokeWidth: 1, strokeDasharray: "2 4" })
   );
@@ -2164,6 +2245,20 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       if (onOpenPendingConsumed) onOpenPendingConsumed();
     }
   }, [openPendingRequest]);
+  const badgesByRes = useMemo(() => {
+    const map = {};
+    reservations.forEach((r) => {
+      if (r.date === selectedDate) map[r.id] = reservationBadges(r, reservations, clients);
+    });
+    return map;
+  }, [reservations, clients, selectedDate]);
+  const openTableFromBook = (r) => {
+    const t = tables.find((x) => x.id === (r.tableIds || [])[0]);
+    if (!t) return;
+    setArea(t.area);
+    setMode("none");
+    setSelectedTable({ ...t, ...statusOfTable(t.id, reservations, selectedDate, selectedSlot) });
+  };
   const [manualSelected, setManualSelected] = useState([]);
   const [manualForm, setManualForm] = useState({ name: "", phone: "", email: "", partySize: "" });
   const [manualSaving, setManualSaving] = useState(false);
@@ -2338,6 +2433,21 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const pinch = usePinchZoom(setZoom);
+  if (mode === "libro") {
+    return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
+      ReservationBook,
+      {
+        date: selectedDate,
+        reservations,
+        tables,
+        badgesByRes,
+        onChangeDate: setSelectedDate,
+        onBack: () => setMode("none"),
+        onOpenTable: openTableFromBook,
+        onDecide: onDecidePending
+      }
+    ));
+  }
   if (mode === "pendientes") {
     return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
       PendingInbox,
@@ -2389,6 +2499,17 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     },
     s
   ))))), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => {
+        setMode("libro");
+        setSelectedTable(null);
+        setManualSelected([]);
+      },
+      style: styles.editBtn
+    },
+    "\u{1F4D6} Libro de reservas"
+  ), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => {
@@ -2487,6 +2608,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
           t,
           status,
           editMode: false,
+          badges: reservation ? (badgesByRes[reservation.id] || []).map((b) => b.icon) : [],
           isSelected: mode === "manual" ? manualSelected.includes(t.id) : (selectedTable == null ? void 0 : selectedTable.id) === t.id,
           onClick: () => {
             if (mode === "manual") {
@@ -2729,6 +2851,37 @@ function PendingInbox({ pending, tables, onDecide, onRejectAll, onBack }) {
     return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 200 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.slot, " \xB7 ", r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, area ? `${area} \xB7 ` : "", "mesa", r.tableIds.length > 1 ? "s" : "", " ", r.tableIds.join(" + "), r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : "", r.email ? ` \xB7 ${r.email}` : "", r.createdAt ? ` \xB7 pedida ${timeAgo(r.createdAt)}` : "")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")));
   })))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14 } }, !askReject ? /* @__PURE__ */ React.createElement("button", { style: styles.noShowBtn, onClick: () => setAskReject(true) }, "Rechazar todas sin avisar\u2026") : /* @__PURE__ */ React.createElement("div", { style: styles.cancelReasonBox }, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "\xBFRechazar las ", pending.length, " reservas pendientes ", /* @__PURE__ */ React.createElement("b", null, "sin avisar a los clientes"), "? \xDAsalo para limpiar reservas falsas."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: rejectAll, disabled: busy }, busy ? "Rechazando\u2026" : "S\xED, rechazar todas"), /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => setAskReject(false), disabled: busy }, "Cancelar"))))));
 }
+function ReservationBook({ date, reservations, tables, badgesByRes, onChangeDate, onBack, onOpenTable, onDecide }) {
+  const [filter, setFilter] = useState("todas");
+  const dayRes = sortBook(reservations.filter((r) => r.date === date));
+  const stats = computeBookStats(dayRes);
+  const list = filterBook(dayRes, filter);
+  const shift = (n) => {
+    const d = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    onChangeDate(d.toISOString().slice(0, 10));
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: styles.bookWrap }, /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onBack }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("h2", { style: styles.panelTitle }, "\u{1F4D6} Libro de reservas"), /* @__PURE__ */ React.createElement("div", { style: styles.bookNav }, /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(-1), "aria-label": "D\xEDa anterior" }, "\u2039"), /* @__PURE__ */ React.createElement("input", { type: "date", style: { ...styles.input, width: "auto" }, value: date, onChange: (e) => e.target.value && onChangeDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(1), "aria-label": "D\xEDa siguiente" }, "\u203A"), /* @__PURE__ */ React.createElement("button", { style: styles.editBtn, onClick: () => onChangeDate(todayISO()) }, "Hoy")), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, dayLabel(date)), /* @__PURE__ */ React.createElement("div", { style: styles.bookStats }, /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.reservas), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "reservas")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.comensales), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "comensales")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.mesas, "/", tables.length), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "mesas ocupadas"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.areaPicker, flexWrap: "wrap" } }, BOOK_FILTERS.map((f) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: f.id,
+      onClick: () => setFilter(f.id),
+      style: { ...styles.areaChip, ...filter === f.id ? styles.areaChipActive : {} }
+    },
+    f.label,
+    " (",
+    filterBook(dayRes, f.id).length,
+    ")"
+  ))), /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 8 } }, "\u2B50 habitual \xB7 \u{1F382} cumplea\xF1os \xB7 \u26A0\uFE0F alergias \xB7 \u{1F6A9} no presentado antes \xB7 \u{1F4DD} nota"), list.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, dayRes.length === 0 ? "Sin reservas este d\xEDa." : "No hay reservas con este filtro.") : /* @__PURE__ */ React.createElement("div", null, list.map((r) => {
+    var _a;
+    const st = bookStatus(r);
+    const badges = badgesByRes[r.id] || [];
+    const ids = r.tableIds || [];
+    const area = (_a = tables.find((t) => t.id === ids[0])) == null ? void 0 : _a.area;
+    const canOpen = st.key === "reservada" || st.key === "enmesa";
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.bookRow }, /* @__PURE__ */ React.createElement("div", { style: styles.bookTime }, r.slot), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 180 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.name, " \xB7 ", r.partySize, " personas", badges.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.bookIcons }, badges.map((b) => /* @__PURE__ */ React.createElement("span", { key: b.key, title: b.label }, b.icon)))), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, area ? `${area} \xB7 ` : "", "mesa", ids.length > 1 ? "s" : "", " ", ids.join(" + "), r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : ""), badges.length > 0 && /* @__PURE__ */ React.createElement("p", { style: styles.bookDetail }, badges.map((b) => /* @__PURE__ */ React.createElement("span", { key: b.key, style: { ...styles.bookDetailItem, ...b.key === "allergy" ? { color: "#E8B4A8" } : {} } }, b.icon, " ", b.label)))), /* @__PURE__ */ React.createElement("div", { style: styles.bookSide }, /* @__PURE__ */ React.createElement("span", { style: { ...styles.bookChip, color: st.color, borderColor: st.color } }, st.label), st.key === "pendiente" && /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")), canOpen && /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => onOpenTable(r) }, "Ver mesa \u2192")));
+  })));
+}
 function TableDetail({ table, now, reservations, clients, onDecide, onMarkArrived, onFinish, onCancel, onNoShow }) {
   var _a, _b;
   const [askingCancelReason, setAskingCancelReason] = useState(false);
@@ -2739,6 +2892,7 @@ function TableDetail({ table, now, reservations, clients, onDecide, onMarkArrive
   const noShowCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim() && r.estado === "no_presentado").length : 0;
   const lateCancelCount = phone ? reservations.filter((r) => r.phone && r.phone.trim() === phone.trim() && r.estado === "cancelada" && r.cancelReason === "cliente").length : 0;
   const clientCard = phone ? (clients || []).find((c) => c.phone && c.phone.trim() === phone.trim()) : null;
+  const isBirthday = !!(clientCard && clientCard.birthday && table.reservation && table.reservation.date && String(clientCard.birthday).slice(5, 10) === String(table.reservation.date).slice(5, 10));
   const handleCancelClick = () => {
     if (window.confirm("\xBFSeguro que quieres cancelar la mesa?")) {
       setAskingCancelReason(true);
@@ -2748,7 +2902,7 @@ function TableDetail({ table, now, reservations, clients, onDecide, onMarkArrive
     onCancel(table.reservation.id, table.id, motivo);
     setAskingCancelReason(false);
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Mesa ", table.id), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Capacidad base: ", table.capacity, " personas"), table.status === "libre" ? /* @__PURE__ */ React.createElement("div", { style: styles.freeTag }, "Libre en este turno") : /* @__PURE__ */ React.createElement("div", { style: styles.reservedBlock }, /* @__PURE__ */ React.createElement("p", { style: styles.resName }, table.reservation.name, visitCount > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.visitCount }, " (te ha visitado ", visitCount, " ", visitCount === 1 ? "vez" : "veces", ")")), /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, table.reservation.partySize, " personas \xB7 ", table.reservation.slot), table.reservation.phone && /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, "Tel: ", table.reservation.phone), (noShowCount > 0 || lateCancelCount >= 2) && /* @__PURE__ */ React.createElement("div", { style: styles.riskBox }, "\u26A0\uFE0F ", noShowCount > 0 && `${noShowCount} no presentado${noShowCount > 1 ? "s" : ""} antes`, noShowCount > 0 && lateCancelCount >= 2 && " \xB7 ", lateCancelCount >= 2 && `${lateCancelCount} cancelaciones tarde`, " ", "\u2014 conviene llamar a confirmar"), clientCard && (clientCard.allergies || clientCard.preferredTable || clientCard.notes) && /* @__PURE__ */ React.createElement("div", { style: styles.clientCardBox }, clientCard.allergies && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u26A0\uFE0F Alergias: ", clientCard.allergies), clientCard.preferredTable && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u2605 Mesa preferida: ", clientCard.preferredTable), clientCard.notes && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u{1F4DD} ", clientCard.notes)), table.reservation.tableIds.length > 1 && /* @__PURE__ */ React.createElement("p", { style: styles.resCombined }, "Combinada con: ", table.reservation.tableIds.filter((id) => id !== table.id).join(", ")), table.reservation.estado === "pendiente" ? /* @__PURE__ */ React.createElement("div", { style: styles.pendingPanel }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingTitle }, "\u23F3 Pendiente de confirmar"), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(table.reservation, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(table.reservation, "rechazar") }, "\u2715 Rechazar"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, arrivedAt ? /* @__PURE__ */ React.createElement("div", { style: styles.arrivedBox }, /* @__PURE__ */ React.createElement("span", { style: styles.arrivedCheck }, "\u2713 Ha llegado"), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, elapsedMin < 60 ? `${elapsedMin} min sentados` : `${Math.floor(elapsedMin / 60)} h ${elapsedMin % 60} min sentados`)) : /* @__PURE__ */ React.createElement("button", { style: styles.arrivedBtn, onClick: () => onMarkArrived(table.reservation.id) }, "\u2713 Marcar como llegada"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Mesa ", table.id), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Capacidad base: ", table.capacity, " personas"), table.status === "libre" ? /* @__PURE__ */ React.createElement("div", { style: styles.freeTag }, "Libre en este turno") : /* @__PURE__ */ React.createElement("div", { style: styles.reservedBlock }, /* @__PURE__ */ React.createElement("p", { style: styles.resName }, table.reservation.name, visitCount > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.visitCount }, " (te ha visitado ", visitCount, " ", visitCount === 1 ? "vez" : "veces", ")")), /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, table.reservation.partySize, " personas \xB7 ", table.reservation.slot), table.reservation.phone && /* @__PURE__ */ React.createElement("p", { style: styles.resMeta }, "Tel: ", table.reservation.phone), (noShowCount > 0 || lateCancelCount >= 2) && /* @__PURE__ */ React.createElement("div", { style: styles.riskBox }, "\u26A0\uFE0F ", noShowCount > 0 && `${noShowCount} no presentado${noShowCount > 1 ? "s" : ""} antes`, noShowCount > 0 && lateCancelCount >= 2 && " \xB7 ", lateCancelCount >= 2 && `${lateCancelCount} cancelaciones tarde`, " ", "\u2014 conviene llamar a confirmar"), clientCard && (clientCard.allergies || clientCard.preferredTable || clientCard.notes || isBirthday) && /* @__PURE__ */ React.createElement("div", { style: styles.clientCardBox }, isBirthday && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u{1F382} Hoy es su cumplea\xF1os"), clientCard.allergies && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u26A0\uFE0F Alergias: ", clientCard.allergies), clientCard.preferredTable && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u2605 Mesa preferida: ", clientCard.preferredTable), clientCard.notes && /* @__PURE__ */ React.createElement("p", { style: styles.clientCardLine }, "\u{1F4DD} ", clientCard.notes)), table.reservation.tableIds.length > 1 && /* @__PURE__ */ React.createElement("p", { style: styles.resCombined }, "Combinada con: ", table.reservation.tableIds.filter((id) => id !== table.id).join(", ")), table.reservation.estado === "pendiente" ? /* @__PURE__ */ React.createElement("div", { style: styles.pendingPanel }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingTitle }, "\u23F3 Pendiente de confirmar"), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(table.reservation, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(table.reservation, "rechazar") }, "\u2715 Rechazar"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, arrivedAt ? /* @__PURE__ */ React.createElement("div", { style: styles.arrivedBox }, /* @__PURE__ */ React.createElement("span", { style: styles.arrivedCheck }, "\u2713 Ha llegado"), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, elapsedMin < 60 ? `${elapsedMin} min sentados` : `${Math.floor(elapsedMin / 60)} h ${elapsedMin % 60} min sentados`)) : /* @__PURE__ */ React.createElement("button", { style: styles.arrivedBtn, onClick: () => onMarkArrived(table.reservation.id) }, "\u2713 Marcar como llegada"), /* @__PURE__ */ React.createElement(
     "button",
     {
       style: styles.finishBtn,
@@ -2820,6 +2974,20 @@ const styles = {
   pendingList: { maxHeight: "68vh", overflowY: "auto", paddingRight: 4 },
   pendingGroupTitle: { fontFamily: "system-ui, sans-serif", fontSize: 12, fontWeight: 600, color: "#9C9488", textTransform: "uppercase", letterSpacing: 0.5, margin: "14px 0 4px 0" },
   pendingLink: { color: "#BBD1EE", textDecoration: "underline" },
+  bookWrap: { maxWidth: 760, width: "100%", margin: "0 auto" },
+  bookNav: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 4px 0" },
+  bookNavBtn: { background: "#201E1A", border: "1px solid #3A3833", color: "#E8D9B5", borderRadius: 10, width: 40, height: 40, fontSize: 20, cursor: "pointer" },
+  bookStats: { display: "flex", gap: 10, margin: "12px 0" },
+  bookStat: { flex: 1, background: "#1C1A17", border: "1px solid #2A2822", borderRadius: 12, padding: "10px 8px", textAlign: "center" },
+  bookStatNum: { fontFamily: "system-ui, sans-serif", fontSize: 22, fontWeight: 700, color: "#F2EDE6", margin: 0 },
+  bookStatLbl: { fontFamily: "system-ui, sans-serif", fontSize: 11, color: "#9C9488", margin: "2px 0 0 0" },
+  bookRow: { display: "flex", gap: 12, padding: "12px 0", borderTop: "1px solid #2A2822", alignItems: "flex-start", flexWrap: "wrap" },
+  bookTime: { width: 52, fontFamily: "system-ui, sans-serif", fontSize: 17, fontWeight: 700, color: "#C9A15A" },
+  bookIcons: { marginLeft: 8, display: "inline-flex", gap: 3, fontSize: 14 },
+  bookDetail: { margin: "4px 0 0 0", display: "flex", flexWrap: "wrap", gap: "2px 10px" },
+  bookDetailItem: { fontFamily: "system-ui, sans-serif", fontSize: 12, color: "#C9BFAE" },
+  bookSide: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 },
+  bookChip: { fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 600, border: "1px solid", borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" },
   pendingPanel: { background: "#1A222C", border: "1px solid #7FA6D9", borderRadius: 12, padding: "12px 14px", marginBottom: 14 },
   pendingTitle: { fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 600, color: "#BBD1EE", margin: "0 0 8px 0" },
   pendingRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid #2B3949", flexWrap: "wrap" },
