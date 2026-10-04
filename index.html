@@ -99,6 +99,7 @@ const BRAND_LOGO_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
 const BRAND_LOGO_ALT = "Taracea";
 const BRAND_LOGO_MAX_HEIGHT = 34;
 const BRAND_LOGO_MAX_WIDTH_VW = 50;
+const CONTACT_PHONE = "";
 const EMAILJS_PUBLIC_KEY = "F9Fy_3A5b79D6Rsk5";
 const EMAILJS_SERVICE_ID = "service_m9duwem";
 const EMAILJS_TEMPLATE_ID = "template_xuxbu7a";
@@ -159,6 +160,114 @@ function waLink(phone, text) {
   else if (/^[6-9]\d{8}$/.test(digits)) digits = "34" + digits;
   if (digits.length < 8) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+function mapLimite(r) {
+  return { id: r.id, tipo: r.tipo, fechaDesde: r.fecha_desde, fechaHasta: r.fecha_hasta, turno: r.turno, zona: r.zona, valor: r.valor, motivo: r.motivo };
+}
+function ruleAppliesToDate(rule, date) {
+  if (rule.fechaDesde && date < rule.fechaDesde) return false;
+  if (rule.fechaHasta && date > rule.fechaHasta) return false;
+  return true;
+}
+function slotInScope(turno, slot, slotGroups) {
+  if (!turno) return true;
+  if (turno === slot) return true;
+  const g = (slotGroups || []).find((x) => x.label === turno);
+  return !!(g && g.slots.includes(slot));
+}
+function scopeText(turno) {
+  if (!turno) return "";
+  if (/^\d{2}:\d{2}$/.test(turno)) return `las ${turno}`;
+  return `la ${String(turno).toLowerCase()}`;
+}
+function committedDiners(rule, reservations, date, tables, slotGroups) {
+  return reservations.filter((r) => r.date === date).filter((r) => {
+    const e = r.estado || "activa";
+    return e === "activa" || e === "pendiente" || e === "finalizada";
+  }).filter((r) => slotInScope(rule.turno, r.slot, slotGroups)).filter((r) => {
+    var _a;
+    return !rule.zona || ((_a = tables.find((t) => t.id === (r.tableIds || [])[0])) == null ? void 0 : _a.area) === rule.zona;
+  }).reduce((s, r) => s + (Number(r.partySize) || 0), 0);
+}
+function checkReservationRules({ rules, reservations, tables, slotGroups, date, slot, area, partySize, audience = "public", contactPhone = "" }) {
+  const list = (rules || []).filter((r) => ruleAppliesToDate(r, date));
+  const fecha = formatDateEs(date);
+  for (const r of list.filter((x) => x.tipo === "cierre")) {
+    if (r.zona && r.zona !== area) continue;
+    if (!slotInScope(r.turno, slot, slotGroups)) continue;
+    const why = r.motivo ? ` (${r.motivo})` : "";
+    if (!r.turno && !r.zona) return `El ${fecha} estamos cerrados${why}. Prueba otro d\xEDa.`;
+    if (!r.turno && r.zona) return `${r.zona} no est\xE1 disponible el ${fecha}${why}. Prueba otra zona u otro d\xEDa.`;
+    return `No admitimos reservas para ${scopeText(r.turno)}${r.zona ? ` en ${r.zona}` : ""} el ${fecha}${why}. Prueba otro turno u otro d\xEDa.`;
+  }
+  if (audience !== "staff") {
+    for (const r of list.filter((x) => x.tipo === "grupo_grande")) {
+      if (r.zona && r.zona !== area) continue;
+      if (Number(partySize) >= Number(r.valor)) {
+        return `Para grupos de ${r.valor} o m\xE1s personas, por favor ll\xE1manos para reservar.${contactPhone ? ` Tel\xE9fono: ${contactPhone}.` : ""}`;
+      }
+    }
+  }
+  for (const r of list.filter((x) => x.tipo === "max_comensales")) {
+    if (r.zona && r.zona !== area) continue;
+    if (!slotInScope(r.turno, slot, slotGroups)) continue;
+    const left = Number(r.valor) - committedDiners(r, reservations, date, tables, slotGroups);
+    if (Number(partySize) > left) {
+      const where = r.turno ? `para ${scopeText(r.turno)}` : "ese d\xEDa";
+      const zone = r.zona ? ` en ${r.zona}` : "";
+      return left <= 0 ? `Ya no quedan plazas ${where}${zone}. Prueba otro turno u otro d\xEDa.` : `Solo quedan ${left} plaza${left === 1 ? "" : "s"} ${where}${zone}. Prueba con menos personas, otro turno u otro d\xEDa.`;
+    }
+  }
+  return "";
+}
+function describeRule(r) {
+  const d = r.fechaDesde, h = r.fechaHasta;
+  const fechas = !d && !h ? "todos los d\xEDas" : d && h && d === h ? formatDateEs(d) : d && h ? `${formatDateEs(d)} \u2192 ${formatDateEs(h)}` : d ? `desde el ${formatDateEs(d)}` : `hasta el ${formatDateEs(h)}`;
+  const turno = r.turno ? /^\d{2}:\d{2}$/.test(r.turno) ? `a las ${r.turno}` : r.turno : "todo el d\xEDa";
+  const zona = r.zona || "Sala y Terraza";
+  const nota = r.motivo ? ` \xB7 ${r.motivo}` : "";
+  if (r.tipo === "cierre") return { icon: "\u26D4", title: `Cerrado \xB7 ${fechas}`, detail: `${turno} \xB7 ${zona}${nota}` };
+  if (r.tipo === "max_comensales") return { icon: "\u{1F4CA}", title: `M\xE1ximo ${r.valor} comensales`, detail: `${turno} \xB7 ${zona} \xB7 ${fechas}${nota}` };
+  if (r.tipo === "grupo_grande") return { icon: "\u{1F4DE}", title: `Grupos de ${r.valor} o m\xE1s personas: solo por tel\xE9fono`, detail: `${zona} \xB7 ${fechas}${nota}` };
+  return { icon: "\u2022", title: String(r.tipo), detail: fechas };
+}
+function dayLimitLines(rules, reservations, tables, slotGroups, date) {
+  const lines = [];
+  (rules || []).filter((r) => ruleAppliesToDate(r, date)).forEach((r) => {
+    const where = [r.turno ? /^\d{2}:\d{2}$/.test(r.turno) ? `a las ${r.turno}` : r.turno : "todo el d\xEDa", r.zona].filter(Boolean).join(" \xB7 ");
+    if (r.tipo === "cierre") {
+      lines.push({ key: r.id, icon: "\u26D4", text: `Cerrado: ${where}${r.motivo ? ` \u2014 ${r.motivo}` : ""}`, full: true });
+    } else if (r.tipo === "max_comensales") {
+      const used = committedDiners(r, reservations, date, tables, slotGroups);
+      lines.push({ key: r.id, icon: "\u{1F4CA}", text: `${where}: ${used}/${r.valor} comensales`, full: used >= Number(r.valor) });
+    } else if (r.tipo === "grupo_grande") {
+      lines.push({ key: r.id, icon: "\u{1F4DE}", text: `Grupos de ${r.valor} o m\xE1s personas: solo por tel\xE9fono`, full: false });
+    }
+  });
+  return lines;
+}
+function buildRulePayload(f) {
+  const tipo = f.tipo;
+  const desde = f.desde || "";
+  const hasta = f.hasta || "";
+  if (desde && hasta && hasta < desde) return { error: "La fecha final no puede ser anterior a la inicial." };
+  const turno = f.turno || null;
+  const zona = f.zona || null;
+  const motivo = (f.motivo || "").trim() || null;
+  if (tipo === "cierre") {
+    if (!desde) return { error: "Elige el d\xEDa que quieres cerrar." };
+    return { payload: { tipo, fecha_desde: desde, fecha_hasta: hasta || desde, turno, zona, valor: null, motivo } };
+  }
+  const valor = parseInt(f.valor, 10);
+  if (tipo === "max_comensales") {
+    if (!Number.isFinite(valor) || valor < 1) return { error: "Escribe cu\xE1ntos comensales como m\xE1ximo (1 o m\xE1s)." };
+    return { payload: { tipo, fecha_desde: desde || null, fecha_hasta: hasta || null, turno, zona, valor, motivo } };
+  }
+  if (tipo === "grupo_grande") {
+    if (!Number.isFinite(valor) || valor < 2) return { error: "Escribe desde cu\xE1ntas personas hay que llamar (2 o m\xE1s)." };
+    return { payload: { tipo, fecha_desde: desde || null, fecha_hasta: hasta || null, turno: null, zona, valor, motivo } };
+  }
+  return { error: "Elige el tipo de l\xEDmite." };
 }
 function phoneKey(p) {
   const d = String(p || "").replace(/\D/g, "");
@@ -702,6 +811,10 @@ function App() {
   const [aprobacionManual, setAprobacionManual] = useState(false);
   const [ackedPendingIds, setAckedPendingIds] = useState(() => /* @__PURE__ */ new Set());
   const [openPendingRequest, setOpenPendingRequest] = useState(false);
+  const [rules, setRules] = useState([]);
+  useEffect(() => {
+    sb("limites?select=*&order=creado_en.asc").then((rows) => setRules((rows || []).map(mapLimite))).catch(() => setRules([]));
+  }, []);
   const [clients, setClients] = useState([]);
   const [waitlist, setWaitlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -1055,6 +1168,22 @@ function App() {
       setError(contactError);
       return;
     }
+    const ruleError = checkReservationRules({
+      rules,
+      reservations,
+      tables,
+      slotGroups: SLOT_GROUPS,
+      date: form.date,
+      slot: form.slot,
+      area: form.area,
+      partySize: form.partySize,
+      contactPhone: CONTACT_PHONE
+    });
+    if (ruleError) {
+      setError(ruleError);
+      setPendingSuggestion(null);
+      return;
+    }
     if (form.phone && form.phone.trim()) {
       const recientes = reservations.filter(
         (r) => r.phone && r.phone.trim() === form.phone.trim() && r.createdAt && Date.now() - new Date(r.createdAt).getTime() < 10 * 60 * 1e3
@@ -1087,6 +1216,29 @@ function App() {
       const cfg = await sb("configuracion?select=aprobacion_manual&id=eq.1");
       if (cfg && cfg[0]) pendiente = !!cfg[0].aprobacion_manual;
     } catch (err) {
+    }
+    let currentRules = rules;
+    try {
+      const fresh = await sb("limites?select=*");
+      if (fresh) currentRules = fresh.map(mapLimite);
+    } catch (err) {
+    }
+    const ruleError = checkReservationRules({
+      rules: currentRules,
+      reservations,
+      tables,
+      slotGroups: SLOT_GROUPS,
+      date: form.date,
+      slot: form.slot,
+      area: form.area,
+      partySize: form.partySize,
+      contactPhone: CONTACT_PHONE
+    });
+    if (ruleError) {
+      setError(ruleError);
+      setPendingSuggestion(null);
+      setSaving(false);
+      return;
     }
     const payload = {
       nombre: form.name,
@@ -1215,7 +1367,8 @@ function App() {
       onDecidePending: decidePending,
       onRejectAllPending: rejectAllPending,
       openPendingRequest,
-      onOpenPendingConsumed: () => setOpenPendingRequest(false)
+      onOpenPendingConsumed: () => setOpenPendingRequest(false),
+      rules
     }
   ) : /* @__PURE__ */ React.createElement(
     AdminView,
@@ -1226,6 +1379,8 @@ function App() {
       onToggleReservasPausadas: toggleReservasPausadas,
       aprobacionManual,
       onToggleAprobacionManual: toggleAprobacionManual,
+      rules,
+      setRules,
       tables,
       setTables,
       reservations,
@@ -1239,7 +1394,7 @@ function App() {
 function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving, availableAreas, reservasPausadas, reservations, onCheck, onConfirm, onEditForm, onClientCancel }) {
   const [mode, setMode] = useState("reservar");
   if (reservasPausadas) {
-    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, "Lo sentimos"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "En estos momentos todo nuestro espacio online est\xE1 ocupado. Si quiere puede contactarnos a nuestro tel\xE9fono de reservas."), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "Muchas gracias.")));
+    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, "Lo sentimos"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "En estos momentos todo nuestro espacio online est\xE1 ocupado. Si quiere puede contactarnos a nuestro tel\xE9fono de reservas", CONTACT_PHONE ? `: ${CONTACT_PHONE}` : "", "."), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "Muchas gracias.")));
   }
   if (mode === "cancelar") {
     return /* @__PURE__ */ React.createElement(ClientCancelFlow, { reservations, onCancel: onClientCancel, onBack: () => setMode("reservar") });
@@ -1401,7 +1556,7 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
 }
 const ADMIN_PASSWORD = "taracea2026";
-function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
+function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual, rules, setRules, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
   const [unlocked, setUnlocked] = useState(false);
   const [pass, setPass] = useState("");
   const [wrongPass, setWrongPass] = useState(false);
@@ -1433,6 +1588,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
   }
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, [
     { id: "zonas", label: "Zonas" },
+    { id: "limites", label: "L\xEDmites" },
     { id: "plano", label: "Editar plano" },
     { id: "crear", label: "Crear y combinar mesas" },
     { id: "informes", label: "Informes" },
@@ -1446,7 +1602,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }), tab === "limites" && /* @__PURE__ */ React.createElement(AdminLimits, { rules, setRules }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -2230,7 +2386,7 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed, rules }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const decideAndClose = async (res, decision) => {
     await onDecidePending(res, decision);
@@ -2359,6 +2515,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
     [manualSelected, areaTables]
   );
   const advice = useMemo(() => {
+    var _a;
     if (manualSelected.length === 0 || !manualForm.partySize) return null;
     const partySize = Number(manualForm.partySize);
     const occupiedInArea = areaTables.filter(
@@ -2383,12 +2540,24 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       level = "ok";
       text = `Combinaci\xF3n razonable. El turno est\xE1 al ${Math.round(occupancy * 100)}% de ocupaci\xF3n, hay margen de sobra.`;
     }
+    const ruleWarning = checkReservationRules({
+      rules,
+      reservations,
+      tables,
+      slotGroups: SLOT_GROUPS,
+      date: selectedDate,
+      slot: selectedSlot,
+      area: ((_a = tables.find((t) => t.id === manualSelected[0])) == null ? void 0 : _a.area) || area,
+      partySize,
+      audience: "staff"
+    });
     return {
       level,
       text,
+      ruleWarning,
       autoSuggestion: autoIsBetter ? autoFit : null
     };
-  }, [manualSelected, manualForm.partySize, areaTables, reservations, selectedSlot, selectedDate, area, tables, manualCapacity]);
+  }, [manualSelected, manualForm.partySize, areaTables, reservations, selectedSlot, selectedDate, area, tables, manualCapacity, rules]);
   const handleManualConfirm = async () => {
     if (!manualForm.name.trim() || manualSelected.length === 0 || !manualForm.partySize) return;
     const contactError = validateContact(manualForm, { requirePhone: false, requireEmail: false, strictName: false });
@@ -2441,6 +2610,8 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
         reservations,
         tables,
         badgesByRes,
+        rules,
+        slotGroups: SLOT_GROUPS,
         onChangeDate: setSelectedDate,
         onBack: () => setMode("none"),
         onOpenTable: openTableFromBook,
@@ -2777,6 +2948,7 @@ function ManualReservationPanel({
       }
     },
     advice.text,
+    advice.ruleWarning && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, color: "#E8B4A8" } }, "\u26A0\uFE0F ", advice.ruleWarning, " Como personal puedes reservar igualmente."),
     advice.autoSuggestion && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -2851,8 +3023,67 @@ function PendingInbox({ pending, tables, onDecide, onRejectAll, onBack }) {
     return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 200 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.slot, " \xB7 ", r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, area ? `${area} \xB7 ` : "", "mesa", r.tableIds.length > 1 ? "s" : "", " ", r.tableIds.join(" + "), r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : "", r.email ? ` \xB7 ${r.email}` : "", r.createdAt ? ` \xB7 pedida ${timeAgo(r.createdAt)}` : "")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")));
   })))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14 } }, !askReject ? /* @__PURE__ */ React.createElement("button", { style: styles.noShowBtn, onClick: () => setAskReject(true) }, "Rechazar todas sin avisar\u2026") : /* @__PURE__ */ React.createElement("div", { style: styles.cancelReasonBox }, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "\xBFRechazar las ", pending.length, " reservas pendientes ", /* @__PURE__ */ React.createElement("b", null, "sin avisar a los clientes"), "? \xDAsalo para limpiar reservas falsas."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: rejectAll, disabled: busy }, busy ? "Rechazando\u2026" : "S\xED, rechazar todas"), /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => setAskReject(false), disabled: busy }, "Cancelar"))))));
 }
-function ReservationBook({ date, reservations, tables, badgesByRes, onChangeDate, onBack, onOpenTable, onDecide }) {
+function AdminLimits({ rules, setRules }) {
+  const emptyForm = { tipo: "cierre", desde: "", hasta: "", turno: "", zona: "", valor: "", motivo: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [deleting, setDeleting] = useState(null);
+  const today = todayISO();
+  const expired = (r) => !!r.fechaHasta && r.fechaHasta < today;
+  const sorted = rules.slice().sort(
+    (a, b) => (expired(a) ? 1 : 0) - (expired(b) ? 1 : 0) || String(a.fechaDesde || "").localeCompare(String(b.fechaDesde || "")) || String(a.tipo).localeCompare(String(b.tipo))
+  );
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const handleSave = async () => {
+    const built = buildRulePayload(form);
+    if (built.error) {
+      setMsg(`\u26A0\uFE0F ${built.error}`);
+      setTimeout(() => setMsg(""), 6e3);
+      return;
+    }
+    setSaving(true);
+    try {
+      const [row] = await sb("limites", { method: "POST", body: JSON.stringify(built.payload) });
+      setRules((prev) => [...prev, mapLimite(row)]);
+      setForm({ ...emptyForm, tipo: form.tipo });
+      setMsg("Guardado.");
+    } catch (err) {
+      console.error(err);
+      setMsg(err && err.status === 404 ? "\u26A0\uFE0F Falta ejecutar en Supabase el SQL \xABl\xEDmites y cierres\xBB (limites_y_cierres.sql)." : "\u26A0\uFE0F No se pudo guardar (sin conexi\xF3n).");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setMsg(""), 6e3);
+    }
+  };
+  const handleDelete = async (id) => {
+    try {
+      await sb(`limites?id=eq.${id}`, { method: "DELETE" });
+      setRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error(err);
+      setMsg("\u26A0\uFE0F No se pudo quitar (sin conexi\xF3n).");
+      setTimeout(() => setMsg(""), 6e3);
+    } finally {
+      setDeleting(null);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 640 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "L\xEDmites y cierres"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Cierra d\xEDas o turnos, pon un m\xE1ximo de comensales y decide a partir de cu\xE1ntas personas hay que llamar. Se aplican a las reservas que hacen los clientes por la web; el personal puede reservar igualmente (la app solo le avisa)."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Qu\xE9 quieres a\xF1adir"), /* @__PURE__ */ React.createElement("div", { style: { ...styles.areaPicker, flexWrap: "wrap" } }, [["cierre", "\u26D4 Cerrar d\xEDa o turno"], ["max_comensales", "\u{1F4CA} M\xE1ximo de comensales"], ["grupo_grande", "\u{1F4DE} Grupos grandes"]].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, onClick: () => set({ tipo: id }), style: { ...styles.areaChip, ...form.tipo === id ? styles.areaChipActive : {} } }, label))), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, form.tipo === "cierre" ? "Desde el d\xEDa" : "Desde (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: form.desde, onChange: (e) => set({ desde: e.target.value }) })), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Hasta (opcional)"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: form.hasta, onChange: (e) => set({ hasta: e.target.value }) }))), form.tipo !== "cierre" && /* @__PURE__ */ React.createElement("p", { style: styles.hint }, "Si dejas las fechas vac\xEDas, se aplica todos los d\xEDas."), form.tipo !== "grupo_grande" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Turno"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.turno, onChange: (e) => set({ turno: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Todo el d\xEDa"), SLOT_GROUPS.map((g) => /* @__PURE__ */ React.createElement("option", { key: g.label, value: g.label }, g.label)), TIME_SLOTS.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, "Solo a las ", s)))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.zona, onChange: (e) => set({ zona: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Sala y Terraza"), /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), form.tipo !== "cierre" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { style: styles.label }, form.tipo === "max_comensales" ? "M\xE1ximo de comensales" : "A partir de cu\xE1ntas personas hay que llamar"), /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, style: styles.input, value: form.valor, onChange: (e) => set({ valor: e.target.value }) })), /* @__PURE__ */ React.createElement("label", { style: styles.label }, form.tipo === "cierre" ? "Motivo (se ense\xF1a al cliente)" : "Nota (opcional)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      style: styles.input,
+      value: form.motivo,
+      placeholder: form.tipo === "cierre" ? "Ej: Navidad, evento privado\u2026" : "",
+      onChange: (e) => set({ motivo: e.target.value })
+    }
+  ), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving }, saving ? "Guardando\u2026" : "A\xF1adir"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: msg.startsWith("\u26A0\uFE0F") ? "#E8B4A8" : "#8FBF9F" } }, msg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 24 } }, "L\xEDmites configurados (", rules.length, ")"), rules.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Todav\xEDa no hay ning\xFAn l\xEDmite ni cierre.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, sorted.map((r) => {
+    const d = describeRule(r);
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: { ...styles.resRow, opacity: expired(r) ? 0.5 : 1 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, d.icon, " ", d.title, expired(r) ? " (caducado)" : ""), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, d.detail)), deleting === r.id ? /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => handleDelete(r.id) }, "S\xED, quitar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => setDeleting(null) }, "No")) : /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => setDeleting(r.id) }, "Quitar"));
+  }))));
+}
+function ReservationBook({ date, reservations, tables, badgesByRes, rules, slotGroups, onChangeDate, onBack, onOpenTable, onDecide }) {
   const [filter, setFilter] = useState("todas");
+  const limitLines = dayLimitLines(rules, reservations, tables, slotGroups, date);
   const dayRes = sortBook(reservations.filter((r) => r.date === date));
   const stats = computeBookStats(dayRes);
   const list = filterBook(dayRes, filter);
@@ -2861,7 +3092,7 @@ function ReservationBook({ date, reservations, tables, badgesByRes, onChangeDate
     d.setUTCDate(d.getUTCDate() + n);
     onChangeDate(d.toISOString().slice(0, 10));
   };
-  return /* @__PURE__ */ React.createElement("div", { style: styles.bookWrap }, /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onBack }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("h2", { style: styles.panelTitle }, "\u{1F4D6} Libro de reservas"), /* @__PURE__ */ React.createElement("div", { style: styles.bookNav }, /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(-1), "aria-label": "D\xEDa anterior" }, "\u2039"), /* @__PURE__ */ React.createElement("input", { type: "date", style: { ...styles.input, width: "auto" }, value: date, onChange: (e) => e.target.value && onChangeDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(1), "aria-label": "D\xEDa siguiente" }, "\u203A"), /* @__PURE__ */ React.createElement("button", { style: styles.editBtn, onClick: () => onChangeDate(todayISO()) }, "Hoy")), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, dayLabel(date)), /* @__PURE__ */ React.createElement("div", { style: styles.bookStats }, /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.reservas), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "reservas")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.comensales), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "comensales")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.mesas, "/", tables.length), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "mesas ocupadas"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.areaPicker, flexWrap: "wrap" } }, BOOK_FILTERS.map((f) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { style: styles.bookWrap }, /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onBack }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("h2", { style: styles.panelTitle }, "\u{1F4D6} Libro de reservas"), /* @__PURE__ */ React.createElement("div", { style: styles.bookNav }, /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(-1), "aria-label": "D\xEDa anterior" }, "\u2039"), /* @__PURE__ */ React.createElement("input", { type: "date", style: { ...styles.input, width: "auto" }, value: date, onChange: (e) => e.target.value && onChangeDate(e.target.value) }), /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => shift(1), "aria-label": "D\xEDa siguiente" }, "\u203A"), /* @__PURE__ */ React.createElement("button", { style: styles.editBtn, onClick: () => onChangeDate(todayISO()) }, "Hoy")), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, dayLabel(date)), /* @__PURE__ */ React.createElement("div", { style: styles.bookStats }, /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.reservas), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "reservas")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.comensales), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "comensales")), /* @__PURE__ */ React.createElement("div", { style: styles.bookStat }, /* @__PURE__ */ React.createElement("p", { style: styles.bookStatNum }, stats.mesas, "/", tables.length), /* @__PURE__ */ React.createElement("p", { style: styles.bookStatLbl }, "mesas ocupadas"))), limitLines.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.bookLimits }, /* @__PURE__ */ React.createElement("p", { style: styles.bookLimitsTitle }, "L\xEDmites de este d\xEDa"), limitLines.map((l) => /* @__PURE__ */ React.createElement("p", { key: l.key, style: { ...styles.bookLimitLine, ...l.full ? { color: "#E8B4A8" } : {} } }, l.icon, " ", l.text))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.areaPicker, flexWrap: "wrap" } }, BOOK_FILTERS.map((f) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: f.id,
@@ -2974,6 +3205,9 @@ const styles = {
   pendingList: { maxHeight: "68vh", overflowY: "auto", paddingRight: 4 },
   pendingGroupTitle: { fontFamily: "system-ui, sans-serif", fontSize: 12, fontWeight: 600, color: "#9C9488", textTransform: "uppercase", letterSpacing: 0.5, margin: "14px 0 4px 0" },
   pendingLink: { color: "#BBD1EE", textDecoration: "underline" },
+  bookLimits: { background: "#1C1A17", border: "1px solid #2A2822", borderRadius: 12, padding: "10px 14px", margin: "0 0 12px 0" },
+  bookLimitsTitle: { fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 600, color: "#9C9488", textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 4px 0" },
+  bookLimitLine: { fontFamily: "system-ui, sans-serif", fontSize: 13, color: "#E8D9B5", margin: "3px 0" },
   bookWrap: { maxWidth: 760, width: "100%", margin: "0 auto" },
   bookNav: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 4px 0" },
   bookNavBtn: { background: "#201E1A", border: "1px solid #3A3833", color: "#E8D9B5", borderRadius: 10, width: 40, height: 40, fontSize: 20, cursor: "pointer" },
