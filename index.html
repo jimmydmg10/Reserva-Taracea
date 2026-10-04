@@ -64,7 +64,15 @@ async function sb(path, options = {}) {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Supabase ${options.method || "GET"} ${path} \u2192 ${res.status}: ${body}`);
+    const err = new Error(`Supabase ${options.method || "GET"} ${path} \u2192 ${res.status}: ${body}`);
+    err.status = res.status;
+    try {
+      const j = JSON.parse(body);
+      err.dbCode = j.code;
+      err.dbMessage = j.message;
+    } catch (e) {
+    }
+    throw err;
   }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
@@ -151,6 +159,115 @@ function waLink(phone, text) {
   else if (/^[6-9]\d{8}$/.test(digits)) digits = "34" + digits;
   if (digits.length < 8) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+const DISPOSABLE_EMAIL_DOMAINS = /* @__PURE__ */ new Set([
+  "mailinator.com",
+  "yopmail.com",
+  "guerrillamail.com",
+  "guerrillamail.net",
+  "10minutemail.com",
+  "tempmail.com",
+  "temp-mail.org",
+  "trashmail.com",
+  "sharklasers.com",
+  "getnada.com",
+  "dispostable.com",
+  "maildrop.cc",
+  "fakeinbox.com",
+  "throwawaymail.com",
+  "mintemail.com",
+  "mohmal.com",
+  "emailondeck.com",
+  "tempail.com",
+  "example.com",
+  "example.org",
+  "test.com"
+]);
+const EMAIL_DOMAIN_TYPOS = {
+  "gmial.com": "gmail.com",
+  "gmai.com": "gmail.com",
+  "gmail.con": "gmail.com",
+  "gamil.com": "gmail.com",
+  "gmaill.com": "gmail.com",
+  "gmail.co": "gmail.com",
+  "gnail.com": "gmail.com",
+  "hotmial.com": "hotmail.com",
+  "hotmal.com": "hotmail.com",
+  "hotmail.con": "hotmail.com",
+  "hotnail.com": "hotmail.com",
+  "outlok.com": "outlook.com",
+  "outlook.con": "outlook.com",
+  "yahooo.com": "yahoo.com",
+  "yaho.com": "yahoo.com",
+  "yahoo.con": "yahoo.com",
+  "icloud.con": "icloud.com",
+  "iclod.com": "icloud.com"
+};
+function isValidName(raw) {
+  const s = String(raw || "").trim().replace(/\s+/g, " ");
+  if (s.length < 2 || s.length > 60) return false;
+  if ((s.match(/\p{L}/gu) || []).length < 2) return false;
+  if (!/^\p{L}[\p{L}\p{M}\s'.\-]*$/u.test(s)) return false;
+  if (/(.)\1{3,}/u.test(s)) return false;
+  return true;
+}
+function isFakePhoneDigits(d) {
+  if (/^(\d)\1+$/.test(d)) return true;
+  if ("01234567890123456789".includes(d) || "98765432109876543210".includes(d)) return true;
+  return false;
+}
+function isValidPhone(raw) {
+  const s = String(raw || "").trim();
+  if (!s || !/^\+?[\d\s().\-]+$/.test(s)) return false;
+  let d = s.replace(/\D/g, "");
+  let intl = s.startsWith("+");
+  if (d.startsWith("00")) {
+    d = d.slice(2);
+    intl = true;
+  }
+  if (intl && d.startsWith("34")) {
+    d = d.slice(2);
+    intl = false;
+  }
+  if (!intl && d.length === 11 && d.startsWith("34")) d = d.slice(2);
+  if (intl) return d.length >= 8 && d.length <= 15 && !isFakePhoneDigits(d);
+  return /^[6-9]\d{8}$/.test(d) && !isFakePhoneDigits(d);
+}
+function checkEmail(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) return { ok: false, message: "Escribe tu email." };
+  if (s.length > 120 || !/^(?!.*\.\.)[a-z0-9._%+'\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}$/.test(s)) {
+    return { ok: false, message: "Escribe un email v\xE1lido (por ejemplo nombre@gmail.com)." };
+  }
+  const [local, domain] = s.split("@");
+  if (EMAIL_DOMAIN_TYPOS[domain]) {
+    return { ok: false, message: `\xBFQuisiste decir ${local}@${EMAIL_DOMAIN_TYPOS[domain]}? Revisa el email.` };
+  }
+  if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
+    return { ok: false, message: "No aceptamos emails temporales. Usa tu email habitual." };
+  }
+  return { ok: true };
+}
+function validateContact({ name, phone, email }, { requirePhone = true, requireEmail = true, strictName = true } = {}) {
+  if (strictName) {
+    if (!isValidName(name)) return "Escribe un nombre v\xE1lido (solo letras, m\xEDnimo 2).";
+  } else if (String(name || "").trim().length < 2) {
+    return "Escribe un nombre (m\xEDnimo 2 letras).";
+  }
+  const hasPhone = !!(phone && String(phone).trim());
+  if (hasPhone || requirePhone) {
+    if (!isValidPhone(phone)) return "Escribe un tel\xE9fono v\xE1lido: m\xF3vil de 9 cifras (por ejemplo 612 345 678) o con prefijo internacional (+44\u2026).";
+  }
+  const hasEmail = !!(email && String(email).trim());
+  if (hasEmail || requireEmail) {
+    const r = checkEmail(email);
+    if (!r.ok) return r.message;
+  }
+  return "";
+}
+function friendlySaveError(err) {
+  if (err && err.dbCode === "P0001" && err.dbMessage) return err.dbMessage;
+  return "No hemos podido guardar la reserva. Comprueba tu conexi\xF3n e int\xE9ntalo de nuevo; si sigue fallando, ll\xE1manos.";
 }
 const INITIAL_TABLES = [
   { id: "5", capacity: 7, x: 1, y: 1, area: "Terraza" },
@@ -502,6 +619,8 @@ function App() {
   const [zoneSettings, setZoneSettings] = useState({ Sala: true, Terraza: true });
   const [reservasPausadas, setReservasPausadas] = useState(false);
   const [aprobacionManual, setAprobacionManual] = useState(false);
+  const [ackedPendingIds, setAckedPendingIds] = useState(() => /* @__PURE__ */ new Set());
+  const [openPendingRequest, setOpenPendingRequest] = useState(false);
   const [clients, setClients] = useState([]);
   const [waitlist, setWaitlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -579,45 +698,42 @@ function App() {
     showSystemNotification("\u{1F514} Reservas nuevas", `${count} reservas nuevas`, "new-summary");
   };
   const decidingRef = React.useRef(/* @__PURE__ */ new Set());
-  const pushNotice = (text, links, sticky) => {
+  const pushNotice = (text, links, sticky, ms = 9e3) => {
     const id = `aviso-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setAlerts((prev) => [{ id, kind: "aviso", text, links: links || [] }, ...prev].slice(0, 6));
-    if (!sticky) setTimeout(() => setAlerts((prev) => prev.filter((a) => a.id !== id)), 9e3);
+    if (!sticky) setTimeout(() => setAlerts((prev) => prev.filter((a) => a.id !== id)), ms);
   };
-  const raisePendingAlert = (r, quiet) => {
-    var _a;
-    const area = (_a = tablesRef.current.find((t) => t.id === r.tableIds[0])) == null ? void 0 : _a.area;
-    const text = `Solicitud de reserva: ${r.name} \u2014 ${r.partySize} personas, ${r.slot} (${formatDateEs(r.date)})${area ? ` \xB7 ${area}` : ""} \xB7 mesa${r.tableIds.length > 1 ? "s" : ""} ${r.tableIds.join(" + ")}. \xBFLa confirmas?`;
-    setAlerts((prev) => [{ id: `pend-${r.id}`, kind: "pendiente", text, res: r }, ...prev.filter((a) => a.id !== `pend-${r.id}`)].slice(0, 6));
-    if (!quiet) {
-      playAlertSound("nueva");
-      showSystemNotification("\u{1F514} Reserva pendiente de confirmar", `${r.name} \u2014 ${r.partySize} pers., ${r.slot} (${formatDateEs(r.date)})`, `pend-${r.id}`);
-    }
+  const notifyNewPending = (list) => {
+    if (!list || list.length === 0) return;
+    playAlertSound("nueva");
+    const r = list[0];
+    const body = list.length === 1 ? `${r.name} \u2014 ${r.partySize} pers., ${r.slot} (${formatDateEs(r.date)})` : `${list.length} reservas nuevas por confirmar`;
+    showSystemNotification("\u{1F514} Reserva pendiente de confirmar", body, "pendientes");
   };
-  const decidePending = async (res, decision) => {
+  const decidePending = async (res, decision, opts = {}) => {
     var _a;
-    if (PUBLIC_MODE || !res) return;
-    if (decidingRef.current.has(res.id)) return;
+    if (PUBLIC_MODE || !res) return "ignored";
+    if (decidingRef.current.has(res.id)) return "ignored";
     decidingRef.current.add(res.id);
+    const silent = !!opts.silent;
     const aprobar = decision === "confirmar";
     const nuevoEstado = aprobar ? "activa" : "rechazada";
-    const quitarAviso = () => setAlerts((prev) => prev.filter((a) => a.id !== `pend-${res.id}`));
     try {
       const updated = await sb(`reservas?id=eq.${res.id}&estado=eq.pendiente`, {
         method: "PATCH",
         body: JSON.stringify({ estado: nuevoEstado })
       });
-      quitarAviso();
       if (!updated || updated.length === 0) {
-        pushNotice(`La reserva de ${res.name} ya estaba resuelta (por otro dispositivo o por el propio cliente).`);
-        return;
+        if (!silent) pushNotice(`La reserva de ${res.name} ya estaba resuelta (por otro dispositivo o por el propio cliente).`);
+        return "already";
       }
       setReservations((prev) => prev.map((r) => r.id === res.id ? { ...r, estado: nuevoEstado } : r));
+      if (silent) return "ok";
       const area = ((_a = tablesRef.current.find((t) => t.id === res.tableIds[0])) == null ? void 0 : _a.area) || "";
       const emailOk = aprobar ? await sendConfirmationEmail(res.email, res.name, res.partySize, res.date, res.slot, area) : await sendRejectionEmail(res.email, res.name, res.partySize, res.date, res.slot, area);
       const titulo = aprobar ? `\u2713 Reserva de ${res.name} confirmada.` : `Reserva de ${res.name} rechazada.`;
       if (emailOk) {
-        pushNotice(`${titulo} Email enviado al cliente.`);
+        pushNotice(`${titulo} Email enviado al cliente.`, [], false, 5e3);
       } else {
         const fecha = formatDateEs(res.date);
         const mensaje = aprobar ? `Hola ${res.name}, te confirmamos tu reserva para ${res.partySize} personas el ${fecha} a las ${res.slot}. \xA1Te esperamos! \u2014 ${BRAND_LOGO_ALT}` : `Hola ${res.name}, lo sentimos: no podemos confirmar tu reserva para el ${fecha} a las ${res.slot}. Si quieres, dinos otro d\xEDa u hora y lo miramos. \u2014 ${BRAND_LOGO_ALT}`;
@@ -627,12 +743,29 @@ function App() {
         if (res.phone) links.push({ label: "\u{1F4DE} Llamar", href: `tel:${res.phone}` });
         pushNotice(`${titulo} No se ha podido avisar por email${res.email ? "" : " (no dej\xF3 email)"}: av\xEDsale t\xFA.`, links, true);
       }
+      return "ok";
     } catch (err) {
       console.error("No se pudo guardar la decisi\xF3n:", err);
-      pushNotice("No se pudo guardar la decisi\xF3n (sin conexi\xF3n). Int\xE9ntalo de nuevo.");
+      if (!silent) pushNotice("No se pudo guardar la decisi\xF3n (sin conexi\xF3n). Int\xE9ntalo de nuevo.");
+      return "error";
     } finally {
       decidingRef.current.delete(res.id);
     }
+  };
+  const rejectAllPending = async (list) => {
+    if (PUBLIC_MODE) return;
+    let ok = 0;
+    let failed = 0;
+    for (const r of list) {
+      const result = await decidePending(r, "rechazar", { silent: true });
+      if (result === "ok") ok++;
+      else if (result === "error") failed++;
+    }
+    pushNotice(
+      `${ok} reserva${ok === 1 ? "" : "s"} rechazada${ok === 1 ? "" : "s"} sin avisar a los clientes.${failed ? ` No se pudieron rechazar ${failed} (sin conexi\xF3n): int\xE9ntalo de nuevo.` : ""}`,
+      [],
+      failed > 0
+    );
   };
   const reservationSig = (r) => `${(r.name || "").trim().toLowerCase()}|${(r.phone || "").trim()}|${r.date}|${r.slot}`;
   const registerOwnReservation = (r) => {
@@ -659,7 +792,7 @@ function App() {
       if (consumeOwnSignature(r)) return;
       normales.push(r);
     });
-    pendientes.forEach((r, i) => raisePendingAlert(r, i > 0));
+    notifyNewPending(pendientes);
     if (normales.length === 0) return;
     if (normales.length > 3) raiseNewReservationsSummary(normales.length);
     else normales.forEach((r) => raiseNewReservationAlert(r));
@@ -684,9 +817,6 @@ function App() {
     } else {
       handleNewReservations(mapped.filter((r) => !seenReservationIds.current.has(r.id)));
     }
-    setAlerts(
-      (prev) => prev.filter((a) => a.kind !== "pendiente" || !mapped.some((r) => r.id === a.res.id && r.estado !== "pendiente"))
-    );
   };
   useEffect(() => {
     (async () => {
@@ -753,13 +883,9 @@ function App() {
     const channel = client.channel("cambios-taracea").on("postgres_changes", { event: "*", schema: "public", table: "reservas" }, (payload) => {
       if (payload.eventType === "DELETE") {
         setReservations((prev) => prev.filter((r2) => r2.id !== payload.old.id));
-        setAlerts((prev) => prev.filter((a) => a.id !== `pend-${payload.old.id}`));
         return;
       }
       const r = mapReserva(payload.new);
-      if (r.estado !== "pendiente") {
-        setAlerts((prev) => prev.some((a) => a.id === `pend-${r.id}`) ? prev.filter((a) => a.id !== `pend-${r.id}`) : prev);
-      }
       setReservations((prev) => {
         const exists = prev.some((x) => x.id === r.id);
         return exists ? prev.map((x) => x.id === r.id ? r : x) : [...prev, r];
@@ -843,8 +969,9 @@ function App() {
     setError("");
     setConfirmed(null);
     if (form.website && form.website.trim()) return;
-    if (!form.name.trim()) {
-      setError("Necesitamos un nombre para la reserva.");
+    const contactError = validateContact(form);
+    if (contactError) {
+      setError(contactError);
       return;
     }
     if (form.phone && form.phone.trim()) {
@@ -866,6 +993,13 @@ function App() {
   };
   const handleConfirm = async () => {
     if (form.website && form.website.trim()) return;
+    setError("");
+    const contactError = validateContact(form);
+    if (contactError) {
+      setError(contactError);
+      setPendingSuggestion(null);
+      return;
+    }
     setSaving(true);
     let pendiente = aprobacionManual;
     try {
@@ -889,21 +1023,27 @@ function App() {
       setReservations((prev) => [...prev, newRes]);
       setConfirmed(newRes);
       if (!pendiente) sendConfirmationEmail(form.email, form.name, form.partySize, form.date, form.slot, form.area);
+      setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area, website: "" });
     } catch (err) {
       console.error(err);
-      const newRes = { id: `local-${Date.now()}`, name: form.name, partySize: Number(form.partySize), slot: form.slot, date: form.date, tableIds: pendingSuggestion.tableIds, area: form.area };
-      setReservations((prev) => [...prev, newRes]);
-      setConfirmed(newRes);
+      setError(friendlySaveError(err));
     } finally {
       setSaving(false);
       setPendingSuggestion(null);
-      setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area, website: "" });
     }
   };
   const pendingReservations = useMemo(
     () => reservations.filter((r) => r.estado === "pendiente" && r.date >= todayISO()).sort((a, b) => `${a.date} ${a.slot}`.localeCompare(`${b.date} ${b.slot}`)),
     [reservations]
   );
+  const unseenPending = pendingReservations.filter((r) => !ackedPendingIds.has(r.id));
+  const showPendingBanner = !PUBLIC_MODE && unseenPending.length > 0;
+  const ackPending = () => setAckedPendingIds(new Set(pendingReservations.map((r) => r.id)));
+  const goToPending = () => {
+    ackPending();
+    setView("staff");
+    setOpenPendingRequest(true);
+  };
   const slotReservations = useMemo(
     () => reservations.filter((r) => isActiveRes(r) && r.slot === selectedSlot && r.date === selectedDate),
     [reservations, selectedSlot, selectedDate]
@@ -913,16 +1053,17 @@ function App() {
           filter: invert(1);
           cursor: pointer;
         }
-      `), alerts.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, alerts.map((a) => /* @__PURE__ */ React.createElement(
-    "div",
+      `), (alerts.length > 0 || showPendingBanner) && /* @__PURE__ */ React.createElement("div", { style: styles.alertStack }, showPendingBanner && /* @__PURE__ */ React.createElement(
+    PendingBanner,
     {
-      key: a.id,
-      style: a.kind === "nueva" ? styles.alertBannerNew : a.kind === "pendiente" ? styles.alertBannerPending : a.kind === "aviso" ? styles.alertBannerInfo : styles.alertBanner
-    },
-    /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, a.kind === "nueva" ? "\u{1F514}" : a.kind === "pendiente" ? "\u23F3" : a.kind === "aviso" ? "\u2139\uFE0F" : "\u26A0\uFE0F"),
-    /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), a.kind === "pendiente" && /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => decidePending(a.res, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => decidePending(a.res, "rechazar") }, "\u2715 Rechazar")), a.links && a.links.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, a.links.map((l) => /* @__PURE__ */ React.createElement("a", { key: l.label, href: l.href, target: "_blank", rel: "noreferrer", style: styles.alertLink }, l.label)))),
-    /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")
-  ))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
+      unseen: unseenPending,
+      total: pendingReservations.length,
+      tables,
+      onDecide: decidePending,
+      onReview: goToPending,
+      onDismiss: ackPending
+    }
+  ), alerts.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, style: a.kind === "nueva" ? styles.alertBannerNew : a.kind === "aviso" ? styles.alertBannerInfo : styles.alertBanner }, /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, a.kind === "nueva" ? "\u{1F514}" : a.kind === "aviso" ? "\u2139\uFE0F" : "\u26A0\uFE0F"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, a.text), a.links && a.links.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, a.links.map((l) => /* @__PURE__ */ React.createElement("a", { key: l.label, href: l.href, target: "_blank", rel: "noreferrer", style: styles.alertLink }, l.label)))), /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: () => dismissAlert(a.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("header", { style: styles.header }, /* @__PURE__ */ React.createElement("div", { style: styles.brand }, /* @__PURE__ */ React.createElement("img", { src: BRAND_LOGO_SRC, alt: BRAND_LOGO_ALT, style: styles.brandLogo }), /* @__PURE__ */ React.createElement("span", { style: styles.brandDot }, "\xB7"), /* @__PURE__ */ React.createElement("span", { style: styles.brandSub }, "Reserva de mesas"), /* @__PURE__ */ React.createElement(
     "span",
     {
       style: {
@@ -990,7 +1131,10 @@ function App() {
       adjacency,
       onOwnReservation: registerOwnReservation,
       pendingReservations,
-      onDecidePending: decidePending
+      onDecidePending: decidePending,
+      onRejectAllPending: rejectAllPending,
+      openPendingRequest,
+      onOpenPendingConsumed: () => setOpenPendingRequest(false)
     }
   ) : /* @__PURE__ */ React.createElement(
     AdminView,
@@ -1057,33 +1201,38 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
       }
     },
     availableAreas.map((a) => /* @__PURE__ */ React.createElement("option", { key: a, value: a }, a))
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre *"), /* @__PURE__ */ React.createElement(
     "input",
     {
       style: styles.input,
       value: form.name,
+      autoComplete: "name",
       onChange: (e) => {
         setForm({ ...form, name: e.target.value });
         onEditForm();
       },
       placeholder: "\xBFA nombre de qui\xE9n?"
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono m\xF3vil *"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "tel",
+      inputMode: "tel",
+      autoComplete: "tel",
       style: styles.input,
       value: form.phone,
       onChange: (e) => {
         setForm({ ...form, phone: e.target.value });
         onEditForm();
       },
-      placeholder: "Para confirmar la reserva"
+      placeholder: "Ej: 612 345 678"
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email *"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "email",
+      inputMode: "email",
+      autoComplete: "email",
       style: styles.input,
       value: form.email,
       onChange: (e) => {
@@ -2000,7 +2149,7 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const decideAndClose = async (res, decision) => {
     await onDecidePending(res, decision);
@@ -2009,6 +2158,12 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   const [area, setArea] = useState("Sala");
   const [mode, setMode] = useState("none");
   const [showOccupancy, setShowOccupancy] = useState(false);
+  useEffect(() => {
+    if (openPendingRequest) {
+      setMode("pendientes");
+      if (onOpenPendingConsumed) onOpenPendingConsumed();
+    }
+  }, [openPendingRequest]);
   const [manualSelected, setManualSelected] = useState([]);
   const [manualForm, setManualForm] = useState({ name: "", phone: "", email: "", partySize: "" });
   const [manualSaving, setManualSaving] = useState(false);
@@ -2141,6 +2296,12 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   }, [manualSelected, manualForm.partySize, areaTables, reservations, selectedSlot, selectedDate, area, tables, manualCapacity]);
   const handleManualConfirm = async () => {
     if (!manualForm.name.trim() || manualSelected.length === 0 || !manualForm.partySize) return;
+    const contactError = validateContact(manualForm, { requirePhone: false, requireEmail: false, strictName: false });
+    if (contactError) {
+      setManualMsg(`\u26A0\uFE0F ${contactError}`);
+      setTimeout(() => setManualMsg(""), 6e3);
+      return;
+    }
     setManualSaving(true);
     const payload = {
       nombre: manualForm.name,
@@ -2157,15 +2318,14 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       setReservations((prev) => [...prev, { id: row.id, name: row.nombre, phone: row.telefono, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids }]);
       setManualMsg("Reserva guardada.");
       sendConfirmationEmail(manualForm.email, manualForm.name, manualForm.partySize, selectedDate, selectedSlot, area);
-    } catch (err) {
-      console.error(err);
-      setReservations((prev) => [...prev, { id: `local-${Date.now()}`, name: manualForm.name, phone: manualForm.phone, partySize: Number(manualForm.partySize), slot: selectedSlot, date: selectedDate, tableIds: manualSelected }]);
-      setManualMsg("Guardada localmente (sin conexi\xF3n).");
-    } finally {
-      setManualSaving(false);
       setManualSelected([]);
       setManualForm({ name: "", phone: "", email: "", partySize: "" });
-      setTimeout(() => setManualMsg(""), 3e3);
+    } catch (err) {
+      console.error(err);
+      setManualMsg(`\u26A0\uFE0F ${err && err.dbCode === "P0001" && err.dbMessage ? err.dbMessage : "No se ha podido guardar la reserva (sin conexi\xF3n). Int\xE9ntalo de nuevo."}`);
+    } finally {
+      setManualSaving(false);
+      setTimeout(() => setManualMsg(""), 6e3);
     }
   };
   const floorDims = useMemo(() => {
@@ -2178,6 +2338,18 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const pinch = usePinchZoom(setZoom);
+  if (mode === "pendientes") {
+    return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
+      PendingInbox,
+      {
+        pending: pendingReservations || [],
+        tables,
+        onDecide: onDecidePending,
+        onRejectAll: onRejectAllPending,
+        onBack: () => setMode("none")
+      }
+    ));
+  }
   if (mode === "mover") {
     return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
       AdminMoveReservation,
@@ -2189,7 +2361,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       }
     ));
   }
-  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(PendingPanel, { pending: pendingReservations || [], tables, onDecide: decideAndClose }), /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(PendingStrip, { count: (pendingReservations || []).length, onOpen: () => setMode("pendientes") }), /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: a,
@@ -2504,15 +2676,58 @@ function ManualReservationPanel({
       disabled: manualSaving || manualSelected.length === 0 || !manualForm.name.trim() || !manualForm.partySize
     },
     manualSaving ? "Guardando\u2026" : "Guardar reserva manual"
-  ), manualMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, manualMsg));
+  ), manualMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: manualMsg.startsWith("\u26A0\uFE0F") ? "#E8B4A8" : "#8FBF9F" } }, manualMsg));
 }
-function PendingPanel({ pending, tables, onDecide }) {
-  if (!pending || pending.length === 0) return null;
-  return /* @__PURE__ */ React.createElement("div", { style: styles.pendingPanel }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingTitle }, "\u23F3 Reservas pendientes de confirmar (", pending.length, ")"), pending.map((r) => {
+function timeAgo(iso, nowMs = Date.now()) {
+  if (!iso) return "";
+  const min = Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 6e4));
+  if (min < 1) return "ahora mismo";
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  return `hace ${d} d\xEDa${d === 1 ? "" : "s"}`;
+}
+function dayLabel(dateISO) {
+  const today = todayISO();
+  const t = /* @__PURE__ */ new Date(`${today}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + 1);
+  const tomorrow = t.toISOString().slice(0, 10);
+  if (dateISO === today) return `Hoy \xB7 ${formatDateEs(dateISO)}`;
+  if (dateISO === tomorrow) return `Ma\xF1ana \xB7 ${formatDateEs(dateISO)}`;
+  return formatDateEs(dateISO);
+}
+function PendingStrip({ count, onOpen }) {
+  if (!count) return null;
+  return /* @__PURE__ */ React.createElement("button", { style: styles.pendingStrip, onClick: onOpen }, /* @__PURE__ */ React.createElement("span", null, "\u23F3 ", count, " reserva", count === 1 ? "" : "s", " pendiente", count === 1 ? "" : "s", " de confirmar"), /* @__PURE__ */ React.createElement("span", null, "Revisar \u2192"));
+}
+function PendingBanner({ unseen, total, tables, onDecide, onReview, onDismiss }) {
+  var _a;
+  if (!unseen || unseen.length === 0) return null;
+  const single = unseen.length === 1 ? unseen[0] : null;
+  const area = single ? (_a = tables.find((t) => t.id === single.tableIds[0])) == null ? void 0 : _a.area : null;
+  return /* @__PURE__ */ React.createElement("div", { style: styles.alertBannerPending }, /* @__PURE__ */ React.createElement("span", { style: styles.alertIcon }, "\u23F3"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, single ? /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, "Solicitud de reserva: ", single.name, " \u2014 ", single.partySize, " personas, ", single.slot, " (", formatDateEs(single.date), ")", area ? ` \xB7 ${area}` : "", " \xB7 mesa", single.tableIds.length > 1 ? "s" : "", " ", single.tableIds.join(" + "), ". \xBFLa confirmas?") : /* @__PURE__ */ React.createElement("span", { style: styles.alertText }, unseen.length, " reservas nuevas por confirmar", total > unseen.length ? ` (${total} pendientes en total)` : "", "."), /* @__PURE__ */ React.createElement("div", { style: styles.alertActions }, single && /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(single, "confirmar") }, "\u2713 Confirmar"), single && /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(single, "rechazar") }, "\u2715 Rechazar"), (!single || total > 1) && /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: onReview }, single ? `Ver todas (${total})` : "Revisar"))), /* @__PURE__ */ React.createElement("button", { style: styles.alertClose, onClick: onDismiss }, "\u2715"));
+}
+function PendingInbox({ pending, tables, onDecide, onRejectAll, onBack }) {
+  const [askReject, setAskReject] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const groups = [];
+  pending.forEach((r) => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === r.date) last.items.push(r);
+    else groups.push({ date: r.date, items: [r] });
+  });
+  const rejectAll = async () => {
+    setBusy(true);
+    await onRejectAll(pending);
+    setBusy(false);
+    setAskReject(false);
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 720, width: "100%", margin: "0 auto" } }, /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onBack }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("h2", { style: styles.panelTitle }, "\u23F3 Reservas pendientes de confirmar (", pending.length, ")"), pending.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "No hay reservas pendientes. \u2713") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Ordenadas por d\xEDa y hora, las m\xE1s urgentes arriba. Al confirmar o rechazar, la reserva sale de esta lista."), /* @__PURE__ */ React.createElement("div", { style: styles.pendingList }, groups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.date }, /* @__PURE__ */ React.createElement("p", { style: styles.pendingGroupTitle }, dayLabel(g.date)), g.items.map((r) => {
     var _a;
     const area = (_a = tables.find((t) => t.id === r.tableIds[0])) == null ? void 0 : _a.area;
-    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 180 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, formatDateEs(r.date), " \xB7 ", r.slot, area ? ` \xB7 ${area}` : "", " \xB7 mesa", r.tableIds.length > 1 ? "s" : "", " ", r.tableIds.join(" + "), r.phone ? ` \xB7 ${r.phone}` : "")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")));
-  }));
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 200 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.slot, " \xB7 ", r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, area ? `${area} \xB7 ` : "", "mesa", r.tableIds.length > 1 ? "s" : "", " ", r.tableIds.join(" + "), r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : "", r.email ? ` \xB7 ${r.email}` : "", r.createdAt ? ` \xB7 pedida ${timeAgo(r.createdAt)}` : "")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")));
+  })))), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14 } }, !askReject ? /* @__PURE__ */ React.createElement("button", { style: styles.noShowBtn, onClick: () => setAskReject(true) }, "Rechazar todas sin avisar\u2026") : /* @__PURE__ */ React.createElement("div", { style: styles.cancelReasonBox }, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "\xBFRechazar las ", pending.length, " reservas pendientes ", /* @__PURE__ */ React.createElement("b", null, "sin avisar a los clientes"), "? \xDAsalo para limpiar reservas falsas."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: rejectAll, disabled: busy }, busy ? "Rechazando\u2026" : "S\xED, rechazar todas"), /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => setAskReject(false), disabled: busy }, "Cancelar"))))));
 }
 function TableDetail({ table, now, reservations, clients, onDecide, onMarkArrived, onFinish, onCancel, onNoShow }) {
   var _a, _b;
@@ -2600,7 +2815,11 @@ const styles = {
   alertActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
   alertBtnOk: { background: "#3E7A4C", border: "none", color: "#F2EDE6", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif" },
   alertBtnNo: { background: "#8B4A3E", border: "none", color: "#F2EDE6", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif" },
-  alertLink: { background: "#2A2822", border: "1px solid #4A473F", color: "#E8D9B5", borderRadius: 8, padding: "7px 12px", fontSize: 13, textDecoration: "none", fontFamily: "system-ui, sans-serif" },
+  alertLink: { background: "#2A2822", border: "1px solid #4A473F", color: "#E8D9B5", borderRadius: 8, padding: "7px 12px", fontSize: 13, textDecoration: "none", fontFamily: "system-ui, sans-serif", cursor: "pointer" },
+  pendingStrip: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", background: "#1A222C", border: "1px solid #7FA6D9", borderRadius: 12, padding: "11px 14px", marginBottom: 14, color: "#BBD1EE", fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" },
+  pendingList: { maxHeight: "68vh", overflowY: "auto", paddingRight: 4 },
+  pendingGroupTitle: { fontFamily: "system-ui, sans-serif", fontSize: 12, fontWeight: 600, color: "#9C9488", textTransform: "uppercase", letterSpacing: 0.5, margin: "14px 0 4px 0" },
+  pendingLink: { color: "#BBD1EE", textDecoration: "underline" },
   pendingPanel: { background: "#1A222C", border: "1px solid #7FA6D9", borderRadius: 12, padding: "12px 14px", marginBottom: 14 },
   pendingTitle: { fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 600, color: "#BBD1EE", margin: "0 0 8px 0" },
   pendingRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid #2B3949", flexWrap: "wrap" },
