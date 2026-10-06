@@ -105,7 +105,7 @@ const EMAILJS_SERVICE_ID = "service_m9duwem";
 const EMAILJS_TEMPLATE_ID = "template_xuxbu7a";
 const EMAILJS_CANCEL_TEMPLATE_ID = "";
 const EMAILJS_REJECT_TEMPLATE_ID = "";
-function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area) {
+function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area, lang) {
   if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID) return Promise.resolve(false);
   if (!toEmail || !toEmail.trim()) return Promise.resolve(false);
   if (typeof window === "undefined" || !window.emailjs) return Promise.resolve(false);
@@ -115,13 +115,14 @@ function sendConfirmationEmail(toEmail, toName, partySize, date, slot, area) {
     party_size: partySize,
     res_date: date,
     res_time: slot,
-    res_area: area
+    res_area: area,
+    lang: lang || "es"
   }).then(() => true).catch((err) => {
     console.error("No se pudo mandar el email de confirmaci\xF3n:", err);
     return false;
   });
 }
-function sendCancellationEmail(toEmail, toName, partySize, date, slot) {
+function sendCancellationEmail(toEmail, toName, partySize, date, slot, lang) {
   if (!EMAILJS_PUBLIC_KEY || !EMAILJS_SERVICE_ID || !EMAILJS_CANCEL_TEMPLATE_ID) return Promise.resolve(false);
   if (!toEmail || !toEmail.trim()) return Promise.resolve(false);
   if (typeof window === "undefined" || !window.emailjs) return Promise.resolve(false);
@@ -130,7 +131,8 @@ function sendCancellationEmail(toEmail, toName, partySize, date, slot) {
     to_name: toName,
     party_size: partySize,
     res_date: date,
-    res_time: slot
+    res_time: slot,
+    lang: lang || "es"
   }).then(() => true).catch((err) => {
     console.error("No se pudo mandar el email de cancelaci\xF3n:", err);
     return false;
@@ -161,6 +163,170 @@ function waLink(phone, text) {
   if (digits.length < 8) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
+const GROUP_LABELS_EN = { Comida: "Lunch", Cena: "Dinner" };
+const AREA_LABELS_EN = { Sala: "Dining room", Terraza: "Terrace" };
+function areaLabel(lang, a) {
+  return lang === "en" ? AREA_LABELS_EN[a] || a : a;
+}
+function groupLabel(lang, label) {
+  return lang === "en" ? GROUP_LABELS_EN[label] || label : label;
+}
+const DB_MESSAGES_EN = {
+  "El nombre no es v\xE1lido.": "The name is not valid.",
+  "El n\xFAmero de personas no es v\xE1lido.": "The number of guests is not valid.",
+  "La fecha de la reserva no es v\xE1lida.": "The booking date is not valid.",
+  "La hora de la reserva no es v\xE1lida.": "The booking time is not valid.",
+  "No se ha elegido ninguna mesa.": "No table has been selected.",
+  "El tel\xE9fono no es v\xE1lido.": "The phone number is not valid.",
+  "El email no es v\xE1lido.": "The email is not valid.",
+  "Este tel\xE9fono ya tiene varias reservas pendientes. Para hacer m\xE1s, ll\xE1manos por favor.": "This phone number already has several upcoming bookings. To make more, please call us.",
+  "Hay demasiadas reservas a la vez. Int\xE9ntalo de nuevo en un minuto.": "There are too many bookings at once. Please try again in a minute.",
+  "Hay demasiadas reservas a la vez. Int\xE9ntalo de nuevo en unos minutos.": "There are too many bookings at once. Please try again in a few minutes."
+};
+const I18N = {
+  es: {
+    title: "Reserva tu mesa",
+    subtitle: "El sistema asigna o combina mesas autom\xE1ticamente seg\xFAn el grupo.",
+    day: "D\xEDa",
+    zone: "Zona",
+    name: "Nombre *",
+    namePh: "\xBFA nombre de qui\xE9n?",
+    phone: "Tel\xE9fono m\xF3vil *",
+    phonePh: "Ej: 612 345 678",
+    email: "Email *",
+    emailPh: "Te mandamos la confirmaci\xF3n aqu\xED",
+    people: "Personas",
+    time: "Hora",
+    check: "Ver disponibilidad",
+    confirm: "Confirmar reserva",
+    saving: "Guardando\u2026",
+    sugPre: "Tenemos sitio en {area}: ",
+    sugCombine: "combinaremos las mesas ",
+    sugSingle: "mesa ",
+    sugPost: " (capacidad {cap}).",
+    cancelLink: "\xBFYa tienes una reserva y quieres cancelarla?",
+    pausedTitle: "Lo sentimos",
+    pausedText: "En estos momentos todo nuestro espacio online est\xE1 ocupado. Si quiere puede contactarnos a nuestro tel\xE9fono de reservas{phone}.",
+    pausedThanks: "Muchas gracias.",
+    pendingTitle: "Solicitud recibida",
+    confirmedTitle: "Reserva confirmada",
+    pendingText: "{name}, hemos recibido tu solicitud para {n} personas a las {slot}. El restaurante la revisar\xE1 y te responder\xE1 en breve.",
+    confirmedText: "{name}, tu mesa para {n} personas a las {slot} est\xE1 lista.",
+    assignedOne: "Mesa asignada: {ids} \xB7 {area}",
+    assignedMany: "Mesas asignadas: {ids} \xB7 {area}",
+    cancelTitle: "Cancelar reserva",
+    cancelSub: "Escribe el tel\xE9fono y el email con los que reservaste para encontrarla.",
+    cancelPolicy: "Puedes cancelar tu reserva online hasta {min} minutos antes de la hora reservada. Pasado ese plazo, llama al restaurante para avisar.",
+    phoneLabel: "Tel\xE9fono",
+    emailLabel: "Email",
+    sameAsBooking: "El mismo que usaste al reservar",
+    find: "Buscar mi reserva",
+    notFound: "No encontramos ninguna reserva pr\xF3xima con ese tel\xE9fono y ese email.",
+    guestsTable: "{n} personas \xB7 mesa {ids}",
+    tooLate: "Ya no se puede cancelar online (faltan menos de {min} min). Llama al restaurante.",
+    cancelled: "Cancelada",
+    confirmCancel: "Confirmar cancelaci\xF3n",
+    cancelBtn: "Cancelar",
+    backToBook: "\u2190 Volver a reservar",
+    rateLimit: "Demasiadas reservas seguidas con este tel\xE9fono. Espera unos minutos e int\xE9ntalo de nuevo.",
+    noTables: "No hay mesas en {area} disponibles para {n} personas el {date} a las {slot}. Prueba otro horario, otro d\xEDa o la otra zona.",
+    nameInvalid: "Escribe un nombre v\xE1lido (solo letras, m\xEDnimo 2).",
+    phoneInvalid: "Escribe un tel\xE9fono v\xE1lido: m\xF3vil de 9 cifras (por ejemplo 612 345 678) o con prefijo internacional (+44\u2026).",
+    emailMissing: "Escribe tu email.",
+    emailInvalid: "Escribe un email v\xE1lido (por ejemplo nombre@gmail.com).",
+    emailTypo: "\xBFQuisiste decir {suggestion}? Revisa el email.",
+    emailDisposable: "No aceptamos emails temporales. Usa tu email habitual.",
+    saveError: "No hemos podido guardar la reserva. Comprueba tu conexi\xF3n e int\xE9ntalo de nuevo; si sigue fallando, ll\xE1manos.",
+    ruleClosedDay: "El {date} estamos cerrados{why}. Prueba otro d\xEDa.",
+    ruleZoneClosed: "{zone} no est\xE1 disponible el {date}{why}. Prueba otra zona u otro d\xEDa.",
+    ruleSlotClosed: "No admitimos reservas para {scope}{zoneIn} el {date}{why}. Prueba otro turno u otro d\xEDa.",
+    ruleZoneIn: " en {zone}",
+    ruleLargeGroup: "Para grupos de {n} o m\xE1s personas, por favor ll\xE1manos para reservar.{phone}",
+    rulePhone: " Tel\xE9fono: {p}.",
+    ruleFor: "para {scope}",
+    ruleThatDay: "ese d\xEDa",
+    ruleNoSeats: "Ya no quedan plazas {where}{zone}. Prueba otro turno u otro d\xEDa.",
+    ruleFewSeats: "Solo quedan {left} plaza{s} {where}{zone}. Prueba con menos personas, otro turno u otro d\xEDa."
+  },
+  en: {
+    title: "Book your table",
+    subtitle: "We automatically assign or combine tables to suit your party.",
+    day: "Date",
+    zone: "Area",
+    name: "Name *",
+    namePh: "Who is the booking for?",
+    phone: "Mobile phone *",
+    phonePh: "e.g. +44 7700 900123",
+    email: "Email *",
+    emailPh: "We'll send your confirmation here",
+    people: "Guests",
+    time: "Time",
+    check: "Check availability",
+    confirm: "Confirm booking",
+    saving: "Saving\u2026",
+    sugPre: "We have space in the {area}: ",
+    sugCombine: "we'll combine tables ",
+    sugSingle: "table ",
+    sugPost: " (capacity {cap}).",
+    cancelLink: "Already have a booking and want to cancel it?",
+    pausedTitle: "We're sorry",
+    pausedText: "Our online booking is currently full. You can contact us on our reservations phone{phone}.",
+    pausedThanks: "Thank you.",
+    pendingTitle: "Request received",
+    confirmedTitle: "Booking confirmed",
+    pendingText: "{name}, we've received your request for {n} guests at {slot}. The restaurant will review it and get back to you shortly.",
+    confirmedText: "{name}, your table for {n} guests at {slot} is ready.",
+    assignedOne: "Table assigned: {ids} \xB7 {area}",
+    assignedMany: "Tables assigned: {ids} \xB7 {area}",
+    cancelTitle: "Cancel booking",
+    cancelSub: "Enter the phone and email you booked with so we can find your booking.",
+    cancelPolicy: "You can cancel your booking online up to {min} minutes before the booked time. After that, please call the restaurant to let them know.",
+    phoneLabel: "Phone",
+    emailLabel: "Email",
+    sameAsBooking: "The same one you used to book",
+    find: "Find my booking",
+    notFound: "We couldn't find any upcoming booking with that phone and email.",
+    guestsTable: "{n} guests \xB7 table {ids}",
+    tooLate: "This can no longer be cancelled online (less than {min} min left). Please call the restaurant.",
+    cancelled: "Cancelled",
+    confirmCancel: "Confirm cancellation",
+    cancelBtn: "Cancel",
+    backToBook: "\u2190 Back to booking",
+    rateLimit: "Too many bookings in a row with this phone number. Please wait a few minutes and try again.",
+    noTables: "There are no tables available in the {area} for {n} guests on {date} at {slot}. Try another time, another day or the other area.",
+    nameInvalid: "Please enter a valid name (letters only, at least 2).",
+    phoneInvalid: "Please enter a valid phone number: a 9-digit Spanish mobile (e.g. 612 345 678) or one with an international prefix (+44\u2026).",
+    emailMissing: "Please enter your email.",
+    emailInvalid: "Please enter a valid email (e.g. name@gmail.com).",
+    emailTypo: "Did you mean {suggestion}? Please check your email.",
+    emailDisposable: "We don't accept temporary emails. Please use your usual email.",
+    saveError: "We couldn't save your booking. Check your connection and try again; if it keeps failing, please call us.",
+    ruleClosedDay: "We are closed on {date}{why}. Please try another day.",
+    ruleZoneClosed: "The {zoneLower} is not available on {date}{why}. Please try another area or another day.",
+    ruleSlotClosed: "We are not taking bookings for {scope}{zoneIn} on {date}{why}. Please try another time or another day.",
+    ruleZoneIn: " ({zone})",
+    ruleLargeGroup: "For groups of {n} or more, please call us to book.{phone}",
+    rulePhone: " Phone: {p}.",
+    ruleFor: "for {scope}",
+    ruleThatDay: "that day",
+    ruleNoSeats: "There are no seats left {where}{zone}. Please try another time or another day.",
+    ruleFewSeats: "Only {left} seat{s} left {where}{zone}. Try fewer guests, another time or another day."
+  }
+};
+function tr(lang, key, vars) {
+  const dict = I18N[lang] || I18N.es;
+  const raw = dict[key] !== void 0 ? dict[key] : I18N.es[key] !== void 0 ? I18N.es[key] : key;
+  return raw.replace(/\{(\w+)\}/g, (m, k) => vars && Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m);
+}
+function detectLang() {
+  try {
+    const saved = window.localStorage.getItem("lang");
+    if (saved === "es" || saved === "en") return saved;
+  } catch (e) {
+  }
+  const nav = String(typeof navigator !== "undefined" && navigator.language || "es").toLowerCase();
+  return /^(es|ca|gl|eu)/.test(nav) ? "es" : "en";
+}
 function mapLimite(r) {
   return { id: r.id, tipo: r.tipo, fechaDesde: r.fecha_desde, fechaHasta: r.fecha_hasta, turno: r.turno, zona: r.zona, valor: r.valor, motivo: r.motivo };
 }
@@ -175,10 +341,11 @@ function slotInScope(turno, slot, slotGroups) {
   const g = (slotGroups || []).find((x) => x.label === turno);
   return !!(g && g.slots.includes(slot));
 }
-function scopeText(turno) {
+function scopeText(turno, lang = "es") {
   if (!turno) return "";
-  if (/^\d{2}:\d{2}$/.test(turno)) return `las ${turno}`;
-  return `la ${String(turno).toLowerCase()}`;
+  const isTime = /^\d{2}:\d{2}$/.test(turno);
+  if (lang === "en") return isTime ? turno : String(GROUP_LABELS_EN[turno] || turno).toLowerCase();
+  return isTime ? `las ${turno}` : `la ${String(turno).toLowerCase()}`;
 }
 function committedDiners(rule, reservations, date, tables, slotGroups) {
   return reservations.filter((r) => r.date === date).filter((r) => {
@@ -189,22 +356,28 @@ function committedDiners(rule, reservations, date, tables, slotGroups) {
     return !rule.zona || ((_a = tables.find((t) => t.id === (r.tableIds || [])[0])) == null ? void 0 : _a.area) === rule.zona;
   }).reduce((s, r) => s + (Number(r.partySize) || 0), 0);
 }
-function checkReservationRules({ rules, reservations, tables, slotGroups, date, slot, area, partySize, audience = "public", contactPhone = "" }) {
+function checkReservationRules({ rules, reservations, tables, slotGroups, date, slot, area, partySize, audience = "public", contactPhone = "", lang = "es" }) {
   const list = (rules || []).filter((r) => ruleAppliesToDate(r, date));
   const fecha = formatDateEs(date);
+  const zoneOf = (z) => z ? areaLabel(lang, z) : "";
   for (const r of list.filter((x) => x.tipo === "cierre")) {
     if (r.zona && r.zona !== area) continue;
     if (!slotInScope(r.turno, slot, slotGroups)) continue;
     const why = r.motivo ? ` (${r.motivo})` : "";
-    if (!r.turno && !r.zona) return `El ${fecha} estamos cerrados${why}. Prueba otro d\xEDa.`;
-    if (!r.turno && r.zona) return `${r.zona} no est\xE1 disponible el ${fecha}${why}. Prueba otra zona u otro d\xEDa.`;
-    return `No admitimos reservas para ${scopeText(r.turno)}${r.zona ? ` en ${r.zona}` : ""} el ${fecha}${why}. Prueba otro turno u otro d\xEDa.`;
+    if (!r.turno && !r.zona) return tr(lang, "ruleClosedDay", { date: fecha, why });
+    if (!r.turno && r.zona) return tr(lang, "ruleZoneClosed", { zone: zoneOf(r.zona), zoneLower: zoneOf(r.zona).toLowerCase(), date: fecha, why });
+    return tr(lang, "ruleSlotClosed", {
+      scope: scopeText(r.turno, lang),
+      zoneIn: r.zona ? tr(lang, "ruleZoneIn", { zone: zoneOf(r.zona) }) : "",
+      date: fecha,
+      why
+    });
   }
   if (audience !== "staff") {
     for (const r of list.filter((x) => x.tipo === "grupo_grande")) {
       if (r.zona && r.zona !== area) continue;
       if (Number(partySize) >= Number(r.valor)) {
-        return `Para grupos de ${r.valor} o m\xE1s personas, por favor ll\xE1manos para reservar.${contactPhone ? ` Tel\xE9fono: ${contactPhone}.` : ""}`;
+        return tr(lang, "ruleLargeGroup", { n: r.valor, phone: contactPhone ? tr(lang, "rulePhone", { p: contactPhone }) : "" });
       }
     }
   }
@@ -213,9 +386,9 @@ function checkReservationRules({ rules, reservations, tables, slotGroups, date, 
     if (!slotInScope(r.turno, slot, slotGroups)) continue;
     const left = Number(r.valor) - committedDiners(r, reservations, date, tables, slotGroups);
     if (Number(partySize) > left) {
-      const where = r.turno ? `para ${scopeText(r.turno)}` : "ese d\xEDa";
-      const zone = r.zona ? ` en ${r.zona}` : "";
-      return left <= 0 ? `Ya no quedan plazas ${where}${zone}. Prueba otro turno u otro d\xEDa.` : `Solo quedan ${left} plaza${left === 1 ? "" : "s"} ${where}${zone}. Prueba con menos personas, otro turno u otro d\xEDa.`;
+      const where = r.turno ? tr(lang, "ruleFor", { scope: scopeText(r.turno, lang) }) : tr(lang, "ruleThatDay");
+      const zone = r.zona ? tr(lang, "ruleZoneIn", { zone: zoneOf(r.zona) }) : "";
+      return left <= 0 ? tr(lang, "ruleNoSeats", { where, zone }) : tr(lang, "ruleFewSeats", { left, s: left === 1 ? "" : "s", where, zone });
     }
   }
   return "";
@@ -269,6 +442,25 @@ function buildRulePayload(f) {
   }
   return { error: "Elige el tipo de l\xEDmite." };
 }
+function lateMinutes(r, nowMs) {
+  if ((r.estado || "activa") !== "activa" || r.arrivedAt) return null;
+  const pad = (n) => String(n).padStart(2, "0");
+  const d = new Date(nowMs);
+  const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (r.date !== today) return null;
+  const slotMs = (/* @__PURE__ */ new Date(`${r.date}T${r.slot}:00`)).getTime();
+  if (!Number.isFinite(slotMs)) return null;
+  const mins = Math.floor((nowMs - slotMs) / 6e4);
+  return mins >= LATE_AFTER_MINUTES && mins <= LATE_UNTIL_MINUTES ? mins : null;
+}
+function lateReservations(reservations, nowMs) {
+  return reservations.map((r) => ({ r, mins: lateMinutes(r, nowMs) })).filter((x) => x.mins !== null).sort((a, b) => b.mins - a.mins);
+}
+function shiftISODate(iso, n) {
+  const d = /* @__PURE__ */ new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 function phoneKey(p) {
   const d = String(p || "").replace(/\D/g, "");
   return d.length >= 8 ? d.slice(-9) : "";
@@ -309,11 +501,14 @@ const BOOK_FILTERS = [
   { id: "terminadas", label: "Terminadas" },
   { id: "canceladas", label: "Canceladas" }
 ];
-function bookStatus(r) {
+function bookStatus(r, nowMs) {
   const e = r.estado || "activa";
   if (e === "pendiente") return { key: "pendiente", label: "Pendiente", color: "#7FA6D9", group: "proximas" };
   if (e === "activa") {
-    return r.arrivedAt ? { key: "enmesa", label: "En mesa", color: "#4C9A5C", group: "enmesa" } : { key: "reservada", label: "Reservada", color: "#C9A15A", group: "proximas" };
+    if (r.arrivedAt) return { key: "enmesa", label: "En mesa", color: "#4C9A5C", group: "enmesa" };
+    const late = nowMs != null ? lateMinutes(r, nowMs) : null;
+    if (late !== null) return { key: "tarde", label: `Llega tarde (${late} min)`, color: "#E0A33A", group: "proximas" };
+    return { key: "reservada", label: "Reservada", color: "#C9A15A", group: "proximas" };
   }
   if (e === "finalizada") return { key: "terminada", label: "Terminada", color: "#9C9488", group: "terminadas" };
   if (e === "cancelada") return { key: "cancelada", label: r.cancelReason === "cliente" ? "Cancel\xF3 el cliente" : "Cancelada", color: "#B15347", group: "canceladas" };
@@ -412,41 +607,43 @@ function isValidPhone(raw) {
   if (intl) return d.length >= 8 && d.length <= 15 && !isFakePhoneDigits(d);
   return /^[6-9]\d{8}$/.test(d) && !isFakePhoneDigits(d);
 }
-function checkEmail(raw) {
+function checkEmail(raw, lang = "es") {
   const s = String(raw || "").trim().toLowerCase();
-  if (!s) return { ok: false, message: "Escribe tu email." };
+  if (!s) return { ok: false, message: tr(lang, "emailMissing") };
   if (s.length > 120 || !/^(?!.*\.\.)[a-z0-9._%+'\-]+@[a-z0-9\-]+(\.[a-z0-9\-]+)*\.[a-z]{2,}$/.test(s)) {
-    return { ok: false, message: "Escribe un email v\xE1lido (por ejemplo nombre@gmail.com)." };
+    return { ok: false, message: tr(lang, "emailInvalid") };
   }
   const [local, domain] = s.split("@");
   if (EMAIL_DOMAIN_TYPOS[domain]) {
-    return { ok: false, message: `\xBFQuisiste decir ${local}@${EMAIL_DOMAIN_TYPOS[domain]}? Revisa el email.` };
+    return { ok: false, message: tr(lang, "emailTypo", { suggestion: `${local}@${EMAIL_DOMAIN_TYPOS[domain]}` }) };
   }
   if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
-    return { ok: false, message: "No aceptamos emails temporales. Usa tu email habitual." };
+    return { ok: false, message: tr(lang, "emailDisposable") };
   }
   return { ok: true };
 }
-function validateContact({ name, phone, email }, { requirePhone = true, requireEmail = true, strictName = true } = {}) {
+function validateContact({ name, phone, email }, { requirePhone = true, requireEmail = true, strictName = true, lang = "es" } = {}) {
   if (strictName) {
-    if (!isValidName(name)) return "Escribe un nombre v\xE1lido (solo letras, m\xEDnimo 2).";
+    if (!isValidName(name)) return tr(lang, "nameInvalid");
   } else if (String(name || "").trim().length < 2) {
     return "Escribe un nombre (m\xEDnimo 2 letras).";
   }
   const hasPhone = !!(phone && String(phone).trim());
   if (hasPhone || requirePhone) {
-    if (!isValidPhone(phone)) return "Escribe un tel\xE9fono v\xE1lido: m\xF3vil de 9 cifras (por ejemplo 612 345 678) o con prefijo internacional (+44\u2026).";
+    if (!isValidPhone(phone)) return tr(lang, "phoneInvalid");
   }
   const hasEmail = !!(email && String(email).trim());
   if (hasEmail || requireEmail) {
-    const r = checkEmail(email);
+    const r = checkEmail(email, lang);
     if (!r.ok) return r.message;
   }
   return "";
 }
-function friendlySaveError(err) {
-  if (err && err.dbCode === "P0001" && err.dbMessage) return err.dbMessage;
-  return "No hemos podido guardar la reserva. Comprueba tu conexi\xF3n e int\xE9ntalo de nuevo; si sigue fallando, ll\xE1manos.";
+function friendlySaveError(err, lang = "es") {
+  if (err && err.dbCode === "P0001" && err.dbMessage) {
+    return lang === "en" && DB_MESSAGES_EN[err.dbMessage] ? DB_MESSAGES_EN[err.dbMessage] : err.dbMessage;
+  }
+  return tr(lang, "saveError");
 }
 const INITIAL_TABLES = [
   { id: "5", capacity: 7, x: 1, y: 1, area: "Terraza" },
@@ -815,6 +1012,22 @@ function App() {
   useEffect(() => {
     sb("limites?select=*&order=creado_en.asc").then((rows) => setRules((rows || []).map(mapLimite))).catch(() => setRules([]));
   }, []);
+  const [lang, setLangState] = useState(() => detectLang());
+  const setLang = (l) => {
+    setLangState(l);
+    try {
+      window.localStorage.setItem("lang", l);
+    } catch (e) {
+    }
+  };
+  useEffect(() => {
+    if (PUBLIC_MODE) {
+      try {
+        document.documentElement.lang = lang;
+      } catch (e) {
+      }
+    }
+  }, [lang]);
   const [clients, setClients] = useState([]);
   const [waitlist, setWaitlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -1163,7 +1376,7 @@ function App() {
     setError("");
     setConfirmed(null);
     if (form.website && form.website.trim()) return;
-    const contactError = validateContact(form);
+    const contactError = validateContact(form, { lang });
     if (contactError) {
       setError(contactError);
       return;
@@ -1177,7 +1390,8 @@ function App() {
       slot: form.slot,
       area: form.area,
       partySize: form.partySize,
-      contactPhone: CONTACT_PHONE
+      contactPhone: CONTACT_PHONE,
+      lang
     });
     if (ruleError) {
       setError(ruleError);
@@ -1189,13 +1403,13 @@ function App() {
         (r) => r.phone && r.phone.trim() === form.phone.trim() && r.createdAt && Date.now() - new Date(r.createdAt).getTime() < 10 * 60 * 1e3
       ).length;
       if (recientes >= 3) {
-        setError("Demasiadas reservas seguidas con este tel\xE9fono. Espera unos minutos e int\xE9ntalo de nuevo.");
+        setError(tr(lang, "rateLimit"));
         return;
       }
     }
     const fit = findBestFit(tables, reservations, form.date, form.slot, Number(form.partySize), form.area, adjacency);
     if (!fit) {
-      setError(`No hay mesas en ${form.area.toLowerCase()} disponibles para ${form.partySize} personas el ${form.date} a las ${form.slot}. Prueba otro horario, otro d\xEDa o la otra zona.`);
+      setError(tr(lang, "noTables", { area: areaLabel(lang, form.area).toLowerCase(), n: form.partySize, date: form.date, slot: form.slot }));
       setPendingSuggestion(null);
       return;
     }
@@ -1204,7 +1418,7 @@ function App() {
   const handleConfirm = async () => {
     if (form.website && form.website.trim()) return;
     setError("");
-    const contactError = validateContact(form);
+    const contactError = validateContact(form, { lang });
     if (contactError) {
       setError(contactError);
       setPendingSuggestion(null);
@@ -1232,7 +1446,8 @@ function App() {
       slot: form.slot,
       area: form.area,
       partySize: form.partySize,
-      contactPhone: CONTACT_PHONE
+      contactPhone: CONTACT_PHONE,
+      lang
     });
     if (ruleError) {
       setError(ruleError);
@@ -1255,11 +1470,11 @@ function App() {
       const newRes = { id: row.id, name: row.nombre, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids, area: form.area, estado: pendiente ? "pendiente" : "activa" };
       setReservations((prev) => [...prev, newRes]);
       setConfirmed(newRes);
-      if (!pendiente) sendConfirmationEmail(form.email, form.name, form.partySize, form.date, form.slot, form.area);
+      if (!pendiente) sendConfirmationEmail(form.email, form.name, form.partySize, form.date, form.slot, form.area, lang);
       setForm({ name: "", phone: "", email: "", partySize: 2, date: form.date, slot: "20:00", area: form.area, website: "" });
     } catch (err) {
       console.error(err);
-      setError(friendlySaveError(err));
+      setError(friendlySaveError(err, lang));
     } finally {
       setSaving(false);
       setPendingSuggestion(null);
@@ -1338,6 +1553,8 @@ function App() {
       availableAreas,
       reservasPausadas,
       reservations,
+      lang,
+      setLang,
       onCheck: handleCheckAvailability,
       onConfirm: handleConfirm,
       onEditForm: () => {
@@ -1391,18 +1608,32 @@ function App() {
     }
   ), /* @__PURE__ */ React.createElement("footer", { style: styles.footer }, /* @__PURE__ */ React.createElement("span", null, "AKTEC Manager")));
 }
-function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving, availableAreas, reservasPausadas, reservations, onCheck, onConfirm, onEditForm, onClientCancel }) {
+function LangToggle({ lang, setLang }) {
+  return /* @__PURE__ */ React.createElement("div", { style: styles.langToggle }, ["es", "en"].map((l) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: l,
+      onClick: () => setLang(l),
+      "aria-label": l === "es" ? "Espa\xF1ol" : "English",
+      style: { ...styles.langBtn, ...lang === l ? styles.langBtnActive : {} }
+    },
+    l.toUpperCase()
+  )));
+}
+function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving, availableAreas, reservasPausadas, reservations, lang, setLang, onCheck, onConfirm, onEditForm, onClientCancel }) {
   const [mode, setMode] = useState("reservar");
+  const L = (key, vars) => tr(lang, key, vars);
   if (reservasPausadas) {
-    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, "Lo sentimos"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "En estos momentos todo nuestro espacio online est\xE1 ocupado. Si quiere puede contactarnos a nuestro tel\xE9fono de reservas", CONTACT_PHONE ? `: ${CONTACT_PHONE}` : "", "."), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, "Muchas gracias.")));
+    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement(LangToggle, { lang, setLang }), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, L("pausedTitle")), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, L("pausedText", { phone: CONTACT_PHONE ? `: ${CONTACT_PHONE}` : "" })), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, L("pausedThanks"))));
   }
   if (mode === "cancelar") {
-    return /* @__PURE__ */ React.createElement(ClientCancelFlow, { reservations, onCancel: onClientCancel, onBack: () => setMode("reservar") });
+    return /* @__PURE__ */ React.createElement(ClientCancelFlow, { reservations, lang, setLang, onCancel: onClientCancel, onBack: () => setMode("reservar") });
   }
   if (confirmed) {
-    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmIcon }, confirmed.estado === "pendiente" ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u23F3") : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u2713")), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, confirmed.estado === "pendiente" ? "Solicitud recibida" : "Reserva confirmada"), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, confirmed.estado === "pendiente" ? `${confirmed.name}, hemos recibido tu solicitud para ${confirmed.partySize} personas a las ${confirmed.slot}. El restaurante la revisar\xE1 y te responder\xE1 en breve.` : `${confirmed.name}, tu mesa para ${confirmed.partySize} personas a las ${confirmed.slot} est\xE1 lista.`), confirmed.estado !== "pendiente" && /* @__PURE__ */ React.createElement("p", { style: styles.confirmMeta }, "Mesa", confirmed.tableIds.length > 1 ? "s" : "", " asignada", confirmed.tableIds.length > 1 ? "s" : "", ": ", confirmed.tableIds.join(" + "), " \xB7 ", confirmed.area)));
+    const ids = confirmed.tableIds || [];
+    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement(LangToggle, { lang, setLang }), /* @__PURE__ */ React.createElement("div", { style: styles.confirmIcon }, confirmed.estado === "pendiente" ? /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u23F3") : /* @__PURE__ */ React.createElement("span", { style: { fontSize: 24 } }, "\u2713")), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, confirmed.estado === "pendiente" ? L("pendingTitle") : L("confirmedTitle")), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, confirmed.estado === "pendiente" ? L("pendingText", { name: confirmed.name, n: confirmed.partySize, slot: confirmed.slot }) : L("confirmedText", { name: confirmed.name, n: confirmed.partySize, slot: confirmed.slot })), confirmed.estado !== "pendiente" && /* @__PURE__ */ React.createElement("p", { style: styles.confirmMeta }, L(ids.length > 1 ? "assignedMany" : "assignedOne", { ids: ids.join(" + "), area: areaLabel(lang, confirmed.area) }))));
   }
-  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Reserva tu mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "El sistema asigna o combina mesas autom\xE1ticamente seg\xFAn el grupo."), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement(LangToggle, { lang, setLang }), /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, L("title")), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, L("subtitle")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "text",
@@ -1414,7 +1645,7 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
       autoComplete: "off",
       "aria-hidden": "true"
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F4C5}"), "D\xEDa"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F4C5}"), L("day")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "date",
@@ -1426,7 +1657,7 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         onEditForm();
       }
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("zone")), /* @__PURE__ */ React.createElement(
     "select",
     {
       style: styles.input,
@@ -1436,8 +1667,8 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         onEditForm();
       }
     },
-    availableAreas.map((a) => /* @__PURE__ */ React.createElement("option", { key: a, value: a }, a))
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre *"), /* @__PURE__ */ React.createElement(
+    availableAreas.map((a) => /* @__PURE__ */ React.createElement("option", { key: a, value: a }, areaLabel(lang, a)))
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("name")), /* @__PURE__ */ React.createElement(
     "input",
     {
       style: styles.input,
@@ -1447,9 +1678,9 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         setForm({ ...form, name: e.target.value });
         onEditForm();
       },
-      placeholder: "\xBFA nombre de qui\xE9n?"
+      placeholder: L("namePh")
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono m\xF3vil *"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("phone")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "tel",
@@ -1461,9 +1692,9 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         setForm({ ...form, phone: e.target.value });
         onEditForm();
       },
-      placeholder: "Ej: 612 345 678"
+      placeholder: L("phonePh")
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email *"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("email")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "email",
@@ -1475,9 +1706,9 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         setForm({ ...form, email: e.target.value });
         onEditForm();
       },
-      placeholder: "Te mandamos la confirmaci\xF3n aqu\xED"
+      placeholder: L("emailPh")
     }
-  ), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F465}"), "Personas"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("div", { style: styles.row }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F465}"), L("people")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "number",
@@ -1490,7 +1721,7 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         onEditForm();
       }
     }
-  )), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F550}"), "Hora"), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F550}"), L("time")), /* @__PURE__ */ React.createElement(
     "select",
     {
       style: styles.input,
@@ -1500,15 +1731,18 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
         onEditForm();
       }
     },
-    SLOT_GROUPS.map((g) => /* @__PURE__ */ React.createElement("optgroup", { key: g.label, label: g.label }, g.slots.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))))
-  ))), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), pendingSuggestion ? /* @__PURE__ */ React.createElement("div", { style: styles.suggestionBox }, /* @__PURE__ */ React.createElement("p", { style: styles.suggestionText }, "Tenemos sitio en ", form.area.toLowerCase(), ": ", pendingSuggestion.tableIds.length > 1 ? "combinaremos las mesas " : "mesa ", /* @__PURE__ */ React.createElement("strong", null, pendingSuggestion.tableIds.join(" + ")), " (capacidad ", pendingSuggestion.totalCapacity, ")."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onConfirm, disabled: saving }, saving ? "Guardando\u2026" : "Confirmar reserva")) : /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onCheck }, "Ver disponibilidad"), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: () => setMode("cancelar") }, "\xBFYa tienes una reserva y quieres cancelarla?")));
+    SLOT_GROUPS.map((g) => /* @__PURE__ */ React.createElement("optgroup", { key: g.label, label: groupLabel(lang, g.label) }, g.slots.map((s) => /* @__PURE__ */ React.createElement("option", { key: s, value: s }, s))))
+  ))), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), pendingSuggestion ? /* @__PURE__ */ React.createElement("div", { style: styles.suggestionBox }, /* @__PURE__ */ React.createElement("p", { style: styles.suggestionText }, L("sugPre", { area: areaLabel(lang, form.area).toLowerCase() }), pendingSuggestion.tableIds.length > 1 ? L("sugCombine") : L("sugSingle"), /* @__PURE__ */ React.createElement("strong", null, pendingSuggestion.tableIds.join(" + ")), L("sugPost", { cap: pendingSuggestion.totalCapacity })), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onConfirm, disabled: saving }, saving ? L("saving") : L("confirm"))) : /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onCheck }, L("check")), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: () => setMode("cancelar") }, L("cancelLink"))));
 }
 const CANCEL_MIN_MINUTES = 30;
+const LATE_AFTER_MINUTES = 15;
+const LATE_UNTIL_MINUTES = 90;
 function minutesUntilReservation(r) {
   const dt = /* @__PURE__ */ new Date(`${r.date}T${r.slot}:00`);
   return (dt.getTime() - Date.now()) / 6e4;
 }
-function ClientCancelFlow({ reservations, onCancel, onBack }) {
+function ClientCancelFlow({ reservations, lang, setLang, onCancel, onBack }) {
+  const L = (key, vars) => tr(lang || "es", key, vars);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [searched, setSearched] = useState(false);
@@ -1519,11 +1753,11 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
   ) : [];
   const handleCancel = (r) => {
     onCancel(r.id);
-    sendCancellationEmail(r.email, r.name, r.partySize, r.date, r.slot);
+    sendCancellationEmail(r.email, r.name, r.partySize, r.date, r.slot, lang);
     setCancelledId(r.id);
     setConfirmingId(null);
   };
-  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Cancelar reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Escribe el tel\xE9fono y el email con los que reservaste para encontrarla."), /* @__PURE__ */ React.createElement("div", { style: styles.policyBox }, "Puedes cancelar tu reserva online hasta ", CANCEL_MIN_MINUTES, " minutos antes de la hora reservada. Pasado ese plazo, llama al restaurante para avisar."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, setLang && /* @__PURE__ */ React.createElement(LangToggle, { lang, setLang }), /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, L("cancelTitle")), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, L("cancelSub")), /* @__PURE__ */ React.createElement("div", { style: styles.policyBox }, L("cancelPolicy", { min: CANCEL_MIN_MINUTES })), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("phoneLabel")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "tel",
@@ -1534,9 +1768,9 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
         setSearched(false);
         setCancelledId(null);
       },
-      placeholder: "El mismo que usaste al reservar"
+      placeholder: L("sameAsBooking")
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Email"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, L("emailLabel")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "email",
@@ -1547,13 +1781,13 @@ function ClientCancelFlow({ reservations, onCancel, onBack }) {
         setSearched(false);
         setCancelledId(null);
       },
-      placeholder: "El mismo que usaste al reservar"
+      placeholder: L("sameAsBooking")
     }
-  ), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setSearched(true), disabled: !phone.trim() || !email.trim() }, "Buscar mi reserva"), searched && matches.length === 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 14 } }, "No encontramos ninguna reserva pr\xF3xima con ese tel\xE9fono y ese email."), searched && matches.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16 } }, matches.map((r) => {
+  ), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setSearched(true), disabled: !phone.trim() || !email.trim() }, L("find")), searched && matches.length === 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 14 } }, L("notFound")), searched && matches.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 16 } }, matches.map((r) => {
     const minsLeft = minutesUntilReservation(r);
     const tooLate = minsLeft < CANCEL_MIN_MINUTES;
-    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.date, " \xB7 ", r.slot), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, r.partySize, " personas \xB7 mesa ", r.tableIds.join(" + ")), tooLate && cancelledId !== r.id && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#E8B4A8", marginTop: 4 } }, "Ya no se puede cancelar online (faltan menos de ", CANCEL_MIN_MINUTES, " min). Llama al restaurante.")), cancelledId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 12 } }, "Cancelada") : tooLate ? null : confirmingId === r.id ? /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => handleCancel(r) }, "Confirmar cancelaci\xF3n") : /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => setConfirmingId(r.id) }, "Cancelar"));
-  })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, "\u2190 Volver a reservar")));
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.date, " \xB7 ", r.slot), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, L("guestsTable", { n: r.partySize, ids: r.tableIds.join(" + ") })), tooLate && cancelledId !== r.id && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#E8B4A8", marginTop: 4 } }, L("tooLate", { min: CANCEL_MIN_MINUTES }))), cancelledId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 12 } }, L("cancelled")) : tooLate ? null : confirmingId === r.id ? /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => handleCancel(r) }, L("confirmCancel")) : /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => setConfirmingId(r.id) }, L("cancelBtn")));
+  })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, L("backToBook"))));
 }
 const ADMIN_PASSWORD = "taracea2026";
 function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual, rules, setRules, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
@@ -2592,6 +2826,12 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       setTimeout(() => setManualMsg(""), 6e3);
     }
   };
+  const [lateSnoozed, setLateSnoozed] = useState([]);
+  const lateList = useMemo(
+    () => lateReservations(reservations, now).filter((x) => !lateSnoozed.includes(x.r.id)),
+    [reservations, now, lateSnoozed]
+  );
+  const lateIds = useMemo(() => new Set(lateList.map((x) => x.r.id)), [lateList]);
   const floorDims = useMemo(() => {
     if (areaTables.length === 0) return { w: 1e3, h: 700 };
     const centers = areaTables.map(tableCenter);
@@ -2602,6 +2842,19 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   const viewBox = `0 0 ${floorDims.w} ${floorDims.h}`;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const pinch = usePinchZoom(setZoom);
+  if (mode === "tarde") {
+    return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
+      LateInbox,
+      {
+        list: lateList,
+        tables,
+        onArrived: handleMarkArrived,
+        onNoShow: handleNoShow,
+        onIgnore: (id) => setLateSnoozed((p) => [...p, id]),
+        onBack: () => setMode("none")
+      }
+    ));
+  }
   if (mode === "libro") {
     return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(
       ReservationBook,
@@ -2612,6 +2865,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
         badgesByRes,
         rules,
         slotGroups: SLOT_GROUPS,
+        nowMs: now,
         onChangeDate: setSelectedDate,
         onBack: () => setMode("none"),
         onOpenTable: openTableFromBook,
@@ -2642,7 +2896,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       }
     ));
   }
-  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(PendingStrip, { count: (pendingReservations || []).length, onOpen: () => setMode("pendientes") }), /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement(PendingStrip, { count: (pendingReservations || []).length, onOpen: () => setMode("pendientes") }), /* @__PURE__ */ React.createElement(LateStrip, { count: lateList.length, onOpen: () => setMode("tarde") }), /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: a,
@@ -2653,15 +2907,15 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       style: { ...styles.areaChip, ...a === area ? styles.areaChipActive : {} }
     },
     a
-  ))), /* @__PURE__ */ React.createElement(
+  ))), /* @__PURE__ */ React.createElement("div", { style: styles.dayNav }, /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => setSelectedDate(shiftISODate(selectedDate, -1)), "aria-label": "D\xEDa anterior" }, "\u2039"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "date",
       style: { ...styles.input, width: "auto" },
       value: selectedDate,
-      onChange: (e) => setSelectedDate(e.target.value)
+      onChange: (e) => e.target.value && setSelectedDate(e.target.value)
     }
-  ), /* @__PURE__ */ React.createElement("div", { style: styles.slotPickerGrouped }, SLOT_GROUPS.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.label, style: styles.slotGroupRow }, /* @__PURE__ */ React.createElement("span", { style: styles.slotGroupLabel }, g.label), g.slots.map((s) => /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("button", { style: styles.bookNavBtn, onClick: () => setSelectedDate(shiftISODate(selectedDate, 1)), "aria-label": "D\xEDa siguiente" }, "\u203A"), /* @__PURE__ */ React.createElement("button", { style: styles.editBtn, onClick: () => setSelectedDate(todayISO()) }, "Hoy")), /* @__PURE__ */ React.createElement("div", { style: styles.slotPickerGrouped }, SLOT_GROUPS.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.label, style: styles.slotGroupRow }, /* @__PURE__ */ React.createElement("span", { style: styles.slotGroupLabel }, g.label), g.slots.map((s) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: s,
@@ -2779,7 +3033,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
           t,
           status,
           editMode: false,
-          badges: reservation ? (badgesByRes[reservation.id] || []).map((b) => b.icon) : [],
+          badges: reservation ? [...lateIds.has(reservation.id) ? ["\u23F0"] : [], ...(badgesByRes[reservation.id] || []).map((b) => b.icon)] : [],
           isSelected: mode === "manual" ? manualSelected.includes(t.id) : (selectedTable == null ? void 0 : selectedTable.id) === t.id,
           onClick: () => {
             if (mode === "manual") {
@@ -3081,7 +3335,24 @@ function AdminLimits({ rules, setRules }) {
     return /* @__PURE__ */ React.createElement("div", { key: r.id, style: { ...styles.resRow, opacity: expired(r) ? 0.5 : 1 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, d.icon, " ", d.title, expired(r) ? " (caducado)" : ""), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, d.detail)), deleting === r.id ? /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => handleDelete(r.id) }, "S\xED, quitar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => setDeleting(null) }, "No")) : /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => setDeleting(r.id) }, "Quitar"));
   }))));
 }
-function ReservationBook({ date, reservations, tables, badgesByRes, rules, slotGroups, onChangeDate, onBack, onOpenTable, onDecide }) {
+function LateStrip({ count, onOpen }) {
+  if (!count) return null;
+  return /* @__PURE__ */ React.createElement("button", { style: styles.lateStrip, onClick: onOpen }, /* @__PURE__ */ React.createElement("span", null, "\u23F0 ", count, " reserva", count === 1 ? "" : "s", " ", count === 1 ? "llega" : "llegan", " tarde"), /* @__PURE__ */ React.createElement("span", null, "Ver \u2192"));
+}
+function LateInbox({ list, tables, onArrived, onNoShow, onIgnore, onBack }) {
+  const [askNoShow, setAskNoShow] = useState(null);
+  return /* @__PURE__ */ React.createElement("div", { style: { maxWidth: 720, width: "100%", margin: "0 auto" } }, /* @__PURE__ */ React.createElement("button", { style: styles.backToStaffBtn, onClick: onBack }, "\u2190 Volver a Sala"), /* @__PURE__ */ React.createElement("h2", { style: styles.panelTitle }, "\u23F0 Reservas que llegan tarde (", list.length, ")"), list.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Nadie llega tarde ahora mismo. \u2713") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Reservas de hoy con ", LATE_AFTER_MINUTES, " minutos o m\xE1s de retraso que todav\xEDa no est\xE1n marcadas como llegadas."), /* @__PURE__ */ React.createElement("div", { style: styles.pendingList }, list.map(({ r, mins }) => {
+    var _a;
+    const ids = r.tableIds || [];
+    const area = (_a = tables.find((t) => t.id === ids[0])) == null ? void 0 : _a.area;
+    const wa = waLink(r.phone, `Hola ${r.name}, te escribimos de ${BRAND_LOGO_ALT}: tenemos tu mesa reservada para las ${r.slot}. \xBFVienes de camino?`);
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 200 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.slot, " \xB7 ", r.name, " \xB7 ", r.partySize, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, /* @__PURE__ */ React.createElement("span", { style: { color: "#E0A33A" } }, "\u23F0 ", mins, " min de retraso"), ` \xB7 ${area ? `${area} \xB7 ` : ""}mesa${ids.length > 1 ? "s" : ""} ${ids.join(" + ")}`, r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : "")), /* @__PURE__ */ React.createElement("div", { style: styles.lateBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onArrived(r.id) }, "\u2713 Ha llegado"), wa && /* @__PURE__ */ React.createElement("a", { href: wa, target: "_blank", rel: "noreferrer", style: styles.alertLink }, "\u{1F4AC} WhatsApp"), askNoShow === r.id ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => {
+      onNoShow(r.id, ids[0]);
+      setAskNoShow(null);
+    } }, "S\xED, no se presenta"), /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => setAskNoShow(null) }, "No")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => onIgnore(r.id) }, "Ignorar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => setAskNoShow(r.id) }, "\u{1F6AB} No se presenta"))));
+  }))));
+}
+function ReservationBook({ date, reservations, tables, badgesByRes, rules, slotGroups, nowMs, onChangeDate, onBack, onOpenTable, onDecide }) {
   const [filter, setFilter] = useState("todas");
   const limitLines = dayLimitLines(rules, reservations, tables, slotGroups, date);
   const dayRes = sortBook(reservations.filter((r) => r.date === date));
@@ -3105,11 +3376,11 @@ function ReservationBook({ date, reservations, tables, badgesByRes, rules, slotG
     ")"
   ))), /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 8 } }, "\u2B50 habitual \xB7 \u{1F382} cumplea\xF1os \xB7 \u26A0\uFE0F alergias \xB7 \u{1F6A9} no presentado antes \xB7 \u{1F4DD} nota"), list.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, dayRes.length === 0 ? "Sin reservas este d\xEDa." : "No hay reservas con este filtro.") : /* @__PURE__ */ React.createElement("div", null, list.map((r) => {
     var _a;
-    const st = bookStatus(r);
+    const st = bookStatus(r, nowMs);
     const badges = badgesByRes[r.id] || [];
     const ids = r.tableIds || [];
     const area = (_a = tables.find((t) => t.id === ids[0])) == null ? void 0 : _a.area;
-    const canOpen = st.key === "reservada" || st.key === "enmesa";
+    const canOpen = st.key === "reservada" || st.key === "enmesa" || st.key === "tarde";
     return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.bookRow }, /* @__PURE__ */ React.createElement("div", { style: styles.bookTime }, r.slot), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 180 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.name, " \xB7 ", r.partySize, " personas", badges.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.bookIcons }, badges.map((b) => /* @__PURE__ */ React.createElement("span", { key: b.key, title: b.label }, b.icon)))), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, area ? `${area} \xB7 ` : "", "mesa", ids.length > 1 ? "s" : "", " ", ids.join(" + "), r.phone ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: `tel:${r.phone}`, style: styles.pendingLink }, r.phone)) : ""), badges.length > 0 && /* @__PURE__ */ React.createElement("p", { style: styles.bookDetail }, badges.map((b) => /* @__PURE__ */ React.createElement("span", { key: b.key, style: { ...styles.bookDetailItem, ...b.key === "allergy" ? { color: "#E8B4A8" } : {} } }, b.icon, " ", b.label)))), /* @__PURE__ */ React.createElement("div", { style: styles.bookSide }, /* @__PURE__ */ React.createElement("span", { style: { ...styles.bookChip, color: st.color, borderColor: st.color } }, st.label), st.key === "pendiente" && /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: () => onDecide(r, "confirmar") }, "\u2713 Confirmar"), /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnNo, onClick: () => onDecide(r, "rechazar") }, "\u2715 Rechazar")), canOpen && /* @__PURE__ */ React.createElement("button", { style: styles.alertLink, onClick: () => onOpenTable(r) }, "Ver mesa \u2192")));
   })));
 }
@@ -3208,6 +3479,12 @@ const styles = {
   bookLimits: { background: "#1C1A17", border: "1px solid #2A2822", borderRadius: 12, padding: "10px 14px", margin: "0 0 12px 0" },
   bookLimitsTitle: { fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 600, color: "#9C9488", textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 4px 0" },
   bookLimitLine: { fontFamily: "system-ui, sans-serif", fontSize: 13, color: "#E8D9B5", margin: "3px 0" },
+  lateStrip: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", background: "#2A2216", border: "1px solid #E0A33A", borderRadius: 12, padding: "11px 14px", marginBottom: 14, color: "#F0CE8A", fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" },
+  lateBtns: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" },
+  dayNav: { display: "flex", alignItems: "center", gap: 6 },
+  langToggle: { display: "flex", gap: 6, justifyContent: "flex-end", marginBottom: 6 },
+  langBtn: { background: "#201E1A", border: "1px solid #3A3833", color: "#9C9488", borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif" },
+  langBtnActive: { background: "#C9A15A", color: "#1C1A17", borderColor: "#C9A15A" },
   bookWrap: { maxWidth: 760, width: "100%", margin: "0 auto" },
   bookNav: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "10px 0 4px 0" },
   bookNavBtn: { background: "#201E1A", border: "1px solid #3A3833", color: "#E8D9B5", borderRadius: 10, width: 40, height: 40, fontSize: 20, cursor: "pointer" },
