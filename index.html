@@ -35,11 +35,15 @@ const { useState, useMemo, useEffect, useRef } = React;
 const PUBLIC_MODE = true;
 const SUPABASE_URL = "https://woqjcdldjmkpmjemnyyh.supabase.co";
 const SUPABASE_KEY = "sb_publishable_wU0yK-S0n21SX_7s0ByXQQ_4IlxouDP";
+const SECURE_MODE = false;
 let ACCESS_TOKEN = null;
-const supa = !PUBLIC_MODE && typeof window !== "undefined" && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+const supa = (SECURE_MODE ? !PUBLIC_MODE : true) && typeof window !== "undefined" && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: SECURE_MODE, autoRefreshToken: SECURE_MODE, detectSessionInUrl: false }
 }) : null;
 const authHeader = () => `Bearer ${ACCESS_TOKEN || SUPABASE_KEY}`;
+function mapEspera(w) {
+  return { id: w.id, name: w.nombre, partySize: w.personas, phone: w.telefono || "", createdAt: w.creado_en };
+}
 function mapReserva(r) {
   return {
     id: r.id,
@@ -95,7 +99,7 @@ async function sb(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 function loadReservas() {
-  return PUBLIC_MODE ? sbRpc("reservas_publicas") : sb("reservas?select=*");
+  return PUBLIC_MODE && SECURE_MODE ? sbRpc("reservas_publicas") : sb("reservas?select=*");
 }
 function sbRpc(name, args) {
   return sb(`rpc/${name}`, { method: "POST", body: JSON.stringify(args || {}) });
@@ -192,6 +196,42 @@ function confirmRequestMessage(r) {
 function waAsk(r) {
   if (!r || !r.phone || !confirmLink(r)) return null;
   return waLink(r.phone, confirmRequestMessage(r));
+}
+function waitlistSuggestions(waitlist, tables, reservations, date, slot, adjacency, areas) {
+  const out = [];
+  let sim = reservations.slice();
+  for (const w of waitlist || []) {
+    const size = Number(w.partySize);
+    if (!size) continue;
+    let fit = null;
+    for (const area of areas) {
+      fit = findBestFit(tables, sim, date, slot, size, area, adjacency);
+      if (fit) {
+        fit = { ...fit, area };
+        break;
+      }
+    }
+    if (fit) {
+      out.push({ entry: w, tableIds: fit.tableIds, area: fit.area, capacity: fit.totalCapacity });
+      sim = [...sim, { id: `sim-${w.id}`, date, tableIds: fit.tableIds, estado: "activa" }];
+    }
+  }
+  return out;
+}
+function nearestSlot(nowMs, slots) {
+  const d = new Date(nowMs);
+  const cur = d.getHours() * 60 + d.getMinutes();
+  let best = slots[0];
+  let bestDiff = Infinity;
+  for (const sl of slots) {
+    const [h, m] = sl.split(":").map(Number);
+    const diff = Math.abs(h * 60 + m - cur);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = sl;
+    }
+  }
+  return best;
 }
 function waLink(phone, text) {
   let digits = String(phone || "").replace(/[^\d+]/g, "");
@@ -1074,7 +1114,7 @@ function LoginScreen({ onLogin, busy, error }) {
   } }), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: submit, disabled: busy }, busy ? "Entrando\u2026" : "Entrar")));
 }
 function App() {
-  const [auth, setAuth] = useState(PUBLIC_MODE || !supa ? { status: "dentro" } : { status: "cargando" });
+  const [auth, setAuth] = useState(PUBLIC_MODE || !SECURE_MODE || !supa ? { status: "dentro", role: "admin" } : { status: "cargando" });
   const [busy, setBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
   const applySession = async (session) => {
@@ -1109,7 +1149,7 @@ function App() {
     }
   };
   useEffect(() => {
-    if (PUBLIC_MODE || !supa) return;
+    if (PUBLIC_MODE || !SECURE_MODE || !supa) return;
     supa.auth.getSession().then(({ data }) => applySession(data && data.session)).catch(() => setAuth({ status: "fuera" }));
     const { data: sub } = supa.auth.onAuthStateChange((event, session) => {
       if (session && session.access_token) ACCESS_TOKEN = session.access_token;
@@ -1156,7 +1196,7 @@ function App() {
   return /* @__PURE__ */ React.createElement(AppMain, { auth: PUBLIC_MODE ? null : auth, onSignOut: handleSignOut });
 }
 function AppMain({ auth, onSignOut }) {
-  const isAdmin = PUBLIC_MODE || auth && auth.role === "admin";
+  const isAdmin = PUBLIC_MODE || !SECURE_MODE || auth && auth.role === "admin";
   const [view, setView] = useState(PUBLIC_MODE ? "cliente" : "staff");
   const [linkToken, setLinkToken] = useState(() => {
     try {
@@ -1439,7 +1479,7 @@ function AppMain({ auth, onSignOut }) {
           setClients(clientes.map((c) => ({ id: c.id, name: c.nombre, phone: c.telefono, postalCode: c.codigo_postal, allergies: c.alergias, preferredTable: c.mesa_preferida, birthday: c.cumpleanos, notes: c.notas })));
         }
         if (espera) {
-          setWaitlist(espera.map((w) => ({ id: w.id, name: w.nombre, partySize: w.personas, createdAt: w.creado_en })));
+          setWaitlist(espera.map(mapEspera));
         }
         setDbStatus("ok");
         if (!PUBLIC_MODE && window.Notification && Notification.permission === "default") {
@@ -1461,7 +1501,18 @@ function AppMain({ auth, onSignOut }) {
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    if (PUBLIC_MODE || !supa) return;
+    if (PUBLIC_MODE) return;
+    const t = setInterval(() => {
+      sb("lista_espera?select=*&order=creado_en.asc").then((rows) => {
+        if (!rows) return;
+        setWaitlist((prev) => [...prev.filter((w) => String(w.id).startsWith("local-")), ...rows.map(mapEspera)]);
+      }).catch(() => {
+      });
+    }, 2e4);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    if (!supa) return;
     const client = supa;
     if (ACCESS_TOKEN && client.realtime && client.realtime.setAuth) client.realtime.setAuth(ACCESS_TOKEN);
     const channel = client.channel("cambios-taracea").on("postgres_changes", { event: "*", schema: "public", table: "reservas" }, (payload) => {
@@ -1539,7 +1590,11 @@ function AppMain({ auth, onSignOut }) {
   };
   const handleClientCancel = async (reservationId, phone, email) => {
     try {
-      await sbRpc("cancelar_reserva_cliente", { p_id: reservationId, p_telefono: phone || "", p_email: email || "" });
+      if (SECURE_MODE) {
+        await sbRpc("cancelar_reserva_cliente", { p_id: reservationId, p_telefono: phone || "", p_email: email || "" });
+      } else {
+        await sb(`reservas?id=eq.${reservationId}`, { method: "PATCH", body: JSON.stringify({ estado: "cancelada", motivo_cancelacion: "cliente" }) });
+      }
     } catch (err) {
       console.error("No se pudo cancelar la reserva:", err);
       return false;
@@ -1635,16 +1690,32 @@ function AppMain({ auth, onSignOut }) {
       return;
     }
     try {
-      const row = await sbRpc("crear_reserva_publica", {
-        p_nombre: form.name,
-        p_telefono: form.phone,
-        p_email: form.email,
-        p_personas: Number(form.partySize),
-        p_turno: form.slot,
-        p_fecha: form.date,
-        p_mesa_ids: pendingSuggestion.tableIds
-      });
-      pendiente = row.estado === "pendiente";
+      let row;
+      if (SECURE_MODE) {
+        row = await sbRpc("crear_reserva_publica", {
+          p_nombre: form.name,
+          p_telefono: form.phone,
+          p_email: form.email,
+          p_personas: Number(form.partySize),
+          p_turno: form.slot,
+          p_fecha: form.date,
+          p_mesa_ids: pendingSuggestion.tableIds
+        });
+        pendiente = row.estado === "pendiente";
+      } else {
+        const payload = {
+          nombre: form.name,
+          telefono: form.phone,
+          email: form.email,
+          personas: Number(form.partySize),
+          turno: form.slot,
+          fecha: form.date,
+          mesa_ids: pendingSuggestion.tableIds
+        };
+        if (pendiente) payload.estado = "pendiente";
+        const [created] = await sb("reservas", { method: "POST", body: JSON.stringify(payload) });
+        row = { ...created, token: created.token_cliente };
+      }
       const newRes = { id: row.id, name: row.nombre, partySize: row.personas, slot: row.turno, date: row.fecha, tableIds: row.mesa_ids, area: form.area, estado: pendiente ? "pendiente" : "activa", token: row.token };
       setReservations((prev) => [...prev, newRes]);
       setConfirmed(newRes);
@@ -1719,7 +1790,7 @@ function AppMain({ auth, onSignOut }) {
       style: { ...styles.navBtn, ...view === "admin" ? styles.navBtnActive : {} }
     },
     "Admin"
-  )), !PUBLIC_MODE && auth && /* @__PURE__ */ React.createElement("div", { style: styles.userChip }, /* @__PURE__ */ React.createElement("span", { style: styles.userChipName, title: auth.email }, auth.name, isAdmin ? " \xB7 admin" : ""), /* @__PURE__ */ React.createElement("button", { style: styles.userChipBtn, onClick: onSignOut }, "Salir"))), PUBLIC_MODE && linkToken ? /* @__PURE__ */ React.createElement(
+  )), !PUBLIC_MODE && SECURE_MODE && auth && /* @__PURE__ */ React.createElement("div", { style: styles.userChip }, /* @__PURE__ */ React.createElement("span", { style: styles.userChipName, title: auth.email }, auth.name, isAdmin ? " \xB7 admin" : ""), /* @__PURE__ */ React.createElement("button", { style: styles.userChipBtn, onClick: onSignOut }, "Salir"))), PUBLIC_MODE && linkToken ? /* @__PURE__ */ React.createElement(
     LinkResponseView,
     {
       token: linkToken,
@@ -1771,6 +1842,7 @@ function AppMain({ auth, onSignOut }) {
       waitlist,
       setWaitlist,
       adjacency,
+      zoneSettings,
       onOwnReservation: registerOwnReservation,
       pendingReservations,
       onDecidePending: decidePending,
@@ -1813,13 +1885,22 @@ function LinkResponseView({ token, lang, setLang, onDone }) {
       setState({ status: "noexiste" });
       return;
     }
-    sbRpc("reserva_por_enlace", { p_token: token }).then((r2) => setState(r2 && r2.encontrada ? { status: "listo", r: r2 } : { status: "noexiste" })).catch(() => setState({ status: "error" }));
+    const lookup = SECURE_MODE ? sbRpc("reserva_por_enlace", { p_token: token }) : sb(`reservas?token_cliente=eq.${token}&select=nombre,personas,turno,fecha,estado,confirmada_en`).then((rows) => {
+      const x = rows && rows[0];
+      return x ? { encontrada: true, nombre: String(x.nombre || "").trim().split(" ")[0], personas: x.personas, turno: x.turno, fecha: x.fecha, estado: x.estado, confirmada: !!x.confirmada_en } : { encontrada: false };
+    });
+    lookup.then((r2) => setState(r2 && r2.encontrada ? { status: "listo", r: r2 } : { status: "noexiste" })).catch(() => setState({ status: "error" }));
   }, [token]);
   const answer = async (accion) => {
     setBusy(true);
     setFailed(false);
     try {
-      await sbRpc("responder_reserva_enlace", { p_token: token, p_accion: accion });
+      if (SECURE_MODE) {
+        await sbRpc("responder_reserva_enlace", { p_token: token, p_accion: accion });
+      } else {
+        const cambios = accion === "confirmar" ? { confirmada_en: (/* @__PURE__ */ new Date()).toISOString() } : { estado: "cancelada", motivo_cancelacion: "cliente" };
+        await sb(`reservas?token_cliente=eq.${token}&estado=in.(activa,pendiente)`, { method: "PATCH", body: JSON.stringify(cambios) });
+      }
       setDone(accion === "confirmar" ? "confirmada" : "cancelada");
     } catch (err) {
       console.error(err);
@@ -1852,7 +1933,7 @@ function ClientView({ form, setForm, error, pendingSuggestion, confirmed, saving
     return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.confirmCard }, /* @__PURE__ */ React.createElement(LangToggle, { lang, setLang }), /* @__PURE__ */ React.createElement("h2", { style: styles.confirmTitle }, L("pausedTitle")), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, L("pausedText", { phone: CONTACT_PHONE ? `: ${CONTACT_PHONE}` : "" })), /* @__PURE__ */ React.createElement("p", { style: styles.confirmText }, L("pausedThanks"))));
   }
   if (mode === "cancelar") {
-    return /* @__PURE__ */ React.createElement(ClientCancelFlow, { lang, setLang, onCancel: onClientCancel, onBack: () => setMode("reservar") });
+    return /* @__PURE__ */ React.createElement(ClientCancelFlow, { reservations, lang, setLang, onCancel: onClientCancel, onBack: () => setMode("reservar") });
   }
   if (confirmed) {
     const ids = confirmed.tableIds || [];
@@ -1966,7 +2047,7 @@ function minutesUntilReservation(r) {
   const dt = /* @__PURE__ */ new Date(`${r.date}T${r.slot}:00`);
   return (dt.getTime() - Date.now()) / 6e4;
 }
-function ClientCancelFlow({ lang, setLang, onCancel, onBack }) {
+function ClientCancelFlow({ reservations, lang, setLang, onCancel, onBack }) {
   const L = (key, vars) => tr(lang || "es", key, vars);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -1981,8 +2062,16 @@ function ClientCancelFlow({ lang, setLang, onCancel, onBack }) {
     setBusy(true);
     setFailed(false);
     try {
-      const rows = await sbRpc("buscar_reservas_cliente", { p_telefono: phone.trim(), p_email: email.trim() });
-      setMatches((rows || []).map(mapReserva).filter((r) => isActiveRes(r) && r.date >= todayISO()));
+      if (SECURE_MODE) {
+        const rows = await sbRpc("buscar_reservas_cliente", { p_telefono: phone.trim(), p_email: email.trim() });
+        setMatches((rows || []).map(mapReserva).filter((r) => isActiveRes(r) && r.date >= todayISO()));
+      } else {
+        setMatches(
+          (reservations || []).filter(
+            (r) => isActiveRes(r) && r.phone && r.phone.trim() === phone.trim() && (!r.email || r.email.trim().toLowerCase() === email.trim().toLowerCase()) && r.date >= todayISO()
+          )
+        );
+      }
     } catch (err) {
       console.error(err);
       setMatches([]);
@@ -2036,8 +2125,37 @@ function ClientCancelFlow({ lang, setLang, onCancel, onBack }) {
     return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, r.date, " \xB7 ", r.slot), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, L("guestsTable", { n: r.partySize, ids: r.tableIds.join(" + ") })), tooLate && cancelledId !== r.id && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#E8B4A8", marginTop: 4 } }, L("tooLate", { min: CANCEL_MIN_MINUTES }))), cancelledId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { color: "#8FBF9F", fontSize: 12 } }, L("cancelled")) : tooLate ? null : confirmingId === r.id ? /* @__PURE__ */ React.createElement("button", { style: styles.cancelReasonBtn, onClick: () => handleCancel(r) }, L("confirmCancel")) : /* @__PURE__ */ React.createElement("button", { style: styles.waitlistRemoveBtn, onClick: () => setConfirmingId(r.id) }, L("cancelBtn")));
   })), /* @__PURE__ */ React.createElement("button", { style: styles.cancelLinkBtn, onClick: onBack }, L("backToBook"))));
 }
+const ADMIN_PASSWORD = "taracea2026";
 function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual, rules, setRules, tables, setTables, reservations, setReservations, clients, adjacency, setAdjacency }) {
+  const [unlocked, setUnlocked] = useState(SECURE_MODE);
+  const [pass, setPass] = useState("");
+  const [wrongPass, setWrongPass] = useState(false);
   const [tab, setTab] = useState("zonas");
+  const handleUnlock = () => {
+    if (pass === ADMIN_PASSWORD) {
+      setUnlocked(true);
+      setWrongPass(false);
+    } else {
+      setWrongPass(true);
+    }
+  };
+  if (!unlocked) {
+    return /* @__PURE__ */ React.createElement("main", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Acceso administrador"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Solo para gesti\xF3n del restaurante."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Contrase\xF1a"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "password",
+        style: styles.input,
+        value: pass,
+        onChange: (e) => {
+          setPass(e.target.value);
+          setWrongPass(false);
+        },
+        onKeyDown: (e) => {
+          if (e.key === "Enter") handleUnlock();
+        }
+      }
+    ), wrongPass && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Contrase\xF1a incorrecta."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleUnlock }, "Entrar")));
+  }
   return /* @__PURE__ */ React.createElement("main", { style: styles.staffMain }, /* @__PURE__ */ React.createElement("div", { style: styles.staffTop }, /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, [
     { id: "zonas", label: "Zonas" },
     { id: "limites", label: "L\xEDmites" },
@@ -2838,7 +2956,7 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed, rules }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, zoneSettings, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed, rules }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const decideAndClose = async (res, decision) => {
     await onDecidePending(res, decision);
@@ -2902,6 +3020,34 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       await sb(`reservas?id=eq.${reservationId}`, { method: "PATCH", body: JSON.stringify({ estado: "cancelada", motivo_cancelacion: motivo }) });
     } catch (err) {
       console.error("No se pudo cancelar la reserva:", err);
+    }
+  };
+  const waitSuggestions = useMemo(() => {
+    const areas = ["Sala", "Terraza"].filter((a) => !zoneSettings || zoneSettings[a] !== false);
+    return waitlistSuggestions(waitlist, tables, reservations, todayISO(), nearestSlot(now, TIME_SLOTS), adjacency, areas);
+  }, [waitlist, tables, reservations, adjacency, zoneSettings, now]);
+  const handleSeatFromWaitlist = async (sug) => {
+    const w = sug.entry;
+    const slot = nearestSlot(Date.now(), TIME_SLOTS);
+    const arrivedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const payload = { nombre: w.name, personas: Number(w.partySize), turno: slot, fecha: todayISO(), mesa_ids: sug.tableIds, llegada: arrivedAt };
+    if (w.phone) payload.telefono = w.phone;
+    if (onOwnReservation) onOwnReservation({ name: w.name, phone: w.phone || "", date: todayISO(), slot });
+    try {
+      const [row] = await sb("reservas", { method: "POST", body: JSON.stringify(payload) });
+      setReservations((prev) => [...prev, mapReserva(row)]);
+      setWaitlist((prev) => prev.filter((x) => x.id !== w.id));
+      if (!String(w.id).startsWith("local-")) {
+        try {
+          await sb(`lista_espera?id=eq.${w.id}`, { method: "DELETE" });
+        } catch (err) {
+          console.error("No se pudo quitar de la lista de espera:", err);
+        }
+      }
+      return `${w.name} sentado en ${sug.tableIds.join(" + ")}.`;
+    } catch (err) {
+      console.error(err);
+      return "No se pudo sentar a esa persona. Int\xE9ntalo otra vez.";
     }
   };
   const handleNoShow = async (reservationId, tableId) => {
@@ -3199,8 +3345,25 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       },
       style: { ...styles.editBtn, ...mode === "espera" ? styles.editBtnActive : {} }
     },
-    mode === "espera" ? "Cerrar lista de espera" : "Lista de espera"
-  )), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total del d\xEDa (", formatDateEs(selectedDate), ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real")), forecast && /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Previsi\xF3n (", forecast.dayName.toLowerCase(), ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, "~", forecast.avg, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "media de los \xFAltimos ", forecast.sampleSize, " ", (() => {
+    mode === "espera" ? "Cerrar lista de espera" : `Lista de espera${waitlist.length ? ` (${waitlist.length})` : ""}${waitSuggestions.length ? " \u{1F4A1}" : ""}`
+  )), mode !== "espera" && waitSuggestions.length > 0 && /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      style: styles.waitHint,
+      onClick: () => {
+        setMode("espera");
+        setSelectedTable(null);
+        setManualSelected([]);
+      }
+    },
+    "\u{1F4A1} Hay mesa libre para ",
+    waitSuggestions[0].entry.name,
+    " (",
+    waitSuggestions[0].entry.partySize,
+    " pers.)",
+    waitSuggestions.length > 1 ? ` y ${waitSuggestions.length - 1} m\xE1s de la lista de espera` : " de la lista de espera",
+    " \u2192"
+  ), showOccupancy && /* @__PURE__ */ React.createElement("div", { style: styles.occupancyPanel }, /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Sala"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.sala.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.sala.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: styles.occupancyCol }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Terraza"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.terraza.people, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.terraza.pct, "% de ocupaci\xF3n real")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Total del d\xEDa (", formatDateEs(selectedDate), ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, occupancyStats.totalPeople, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, occupancyStats.totalPct, "% de ocupaci\xF3n real")), forecast && /* @__PURE__ */ React.createElement("div", { style: { ...styles.occupancyCol, borderLeft: "1px solid #3A3833", paddingLeft: 20 } }, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyZone }, "Previsi\xF3n (", forecast.dayName.toLowerCase(), ")"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, "~", forecast.avg, " personas"), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "media de los \xFAltimos ", forecast.sampleSize, " ", (() => {
     const d = forecast.dayName.toLowerCase();
     return forecast.sampleSize > 1 && !d.endsWith("s") ? `${d}s` : d;
   })()))), /* @__PURE__ */ React.createElement("div", { style: styles.staffBody }, /* @__PURE__ */ React.createElement("div", { style: styles.floorWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.floorHeader }, /* @__PURE__ */ React.createElement("span", null, "\u25A6"), /* @__PURE__ */ React.createElement("span", { style: styles.floorHeaderText }, "Plano de ", area.toLowerCase()), /* @__PURE__ */ React.createElement("div", { style: styles.zoomControls }, /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => ZOOM_LEVELS[Math.max(0, ZOOM_LEVELS.indexOf(z) - 1)]), disabled: ZOOM_LEVELS.indexOf(zoom) === 0 }, "\uFF0D"), /* @__PURE__ */ React.createElement("span", { style: styles.zoomLabel }, zoom === DEFAULT_ZOOM ? "Ajustado" : `${zoom}\xD7`), /* @__PURE__ */ React.createElement("button", { style: styles.zoomBtn, onClick: () => setZoom((z) => ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, ZOOM_LEVELS.indexOf(z) + 1)]), disabled: ZOOM_LEVELS.indexOf(zoom) === ZOOM_LEVELS.length - 1 }, "\uFF0B"))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.floor, overflow: "auto" }, onPointerDown: pinch.onPointerDown, onPointerMove: pinch.onPointerMove, onPointerUp: pinch.onPointerUp, onPointerCancel: pinch.onPointerUp }, /* @__PURE__ */ React.createElement(
@@ -3281,7 +3444,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       onConfirm: handleManualConfirm,
       onUseSuggestion: (fit) => setManualSelected(fit.tableIds)
     }
-  ) : mode === "ficha" ? /* @__PURE__ */ React.createElement(ClientProfilePanel, { clients, setClients }) : mode === "espera" ? /* @__PURE__ */ React.createElement(WaitlistPanel, { waitlist, setWaitlist }) : selectedTable ? /* @__PURE__ */ React.createElement(TableDetail, { table: selectedTable, now, reservations, clients, onDecide: decideAndClose, onMarkArrived: handleMarkArrived, onFinish: handleFinishReservation, onCancel: handleCancelReservation, onNoShow: handleNoShow }) : /* @__PURE__ */ React.createElement(ReservationList, { slotReservations, selectedSlot }))));
+  ) : mode === "ficha" ? /* @__PURE__ */ React.createElement(ClientProfilePanel, { clients, setClients }) : mode === "espera" ? /* @__PURE__ */ React.createElement(WaitlistPanel, { waitlist, setWaitlist, suggestions: waitSuggestions, onSeat: handleSeatFromWaitlist }) : selectedTable ? /* @__PURE__ */ React.createElement(TableDetail, { table: selectedTable, now, reservations, clients, onDecide: decideAndClose, onMarkArrived: handleMarkArrived, onFinish: handleFinishReservation, onCancel: handleCancelReservation, onNoShow: handleNoShow }) : /* @__PURE__ */ React.createElement(ReservationList, { slotReservations, selectedSlot }))));
 }
 function ClientProfilePanel({ clients, setClients }) {
   const [form, setForm] = useState({ name: "", phone: "", postalCode: "", allergies: "", preferredTable: "", birthday: "", notes: "" });
@@ -3315,22 +3478,25 @@ function ClientProfilePanel({ clients, setClients }) {
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Ficha de cliente"), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, 'Guarda los datos del cliente para encontrarlo r\xE1pido la pr\xF3xima vez, en "Reserva manual".'), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "Nombre y apellido" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement("input", { type: "tel", style: styles.input, value: form.phone, onChange: (e) => setForm({ ...form, phone: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "C\xF3digo postal"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.postalCode, onChange: (e) => setForm({ ...form, postalCode: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Alergias / intolerancias"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.allergies, onChange: (e) => setForm({ ...form, allergies: e.target.value }), placeholder: "Ej: frutos secos, gluten\u2026" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa preferida"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.preferredTable, onChange: (e) => setForm({ ...form, preferredTable: e.target.value }), placeholder: "Ej: T5, junto a la ventana\u2026" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Cumplea\xF1os"), /* @__PURE__ */ React.createElement("input", { type: "date", style: styles.input, value: form.birthday, onChange: (e) => setForm({ ...form, birthday: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.notes, onChange: (e) => setForm({ ...form, notes: e.target.value }), placeholder: "Ej: siempre pide sin cebolla\u2026" }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleSave, disabled: saving || !form.name.trim() }, saving ? "Guardando\u2026" : "Guardar ficha"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg), clients.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "Clientes guardados (", clients.length, ")"), /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, clients.slice().reverse().slice(0, 20).map((c) => /* @__PURE__ */ React.createElement("div", { key: c.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, c.name), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, c.phone || "sin tel\xE9fono", " ", c.postalCode ? `\xB7 ${c.postalCode}` : ""), (c.allergies || c.preferredTable || c.notes) && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#C9A15A" } }, c.allergies && `\u26A0\uFE0F ${c.allergies} `, c.preferredTable && `\xB7 mesa: ${c.preferredTable} `, c.notes && `\xB7 ${c.notes}`)))))));
 }
-function WaitlistPanel({ waitlist, setWaitlist }) {
-  const [form, setForm] = useState({ name: "", partySize: "" });
+function WaitlistPanel({ waitlist, setWaitlist, suggestions, onSeat }) {
+  const [form, setForm] = useState({ name: "", partySize: "", phone: "" });
+  const [seatMsg, setSeatMsg] = useState("");
+  const sugById = Object.fromEntries((suggestions || []).map((x) => [x.entry.id, x]));
   const [saving, setSaving] = useState(false);
   const handleAdd = async () => {
     if (!form.name.trim() || !form.partySize) return;
     setSaving(true);
     const payload = { nombre: form.name, personas: Number(form.partySize) };
+    if (form.phone.trim()) payload.telefono = form.phone.trim();
     try {
       const [row] = await sb("lista_espera", { method: "POST", body: JSON.stringify(payload) });
-      setWaitlist((prev) => [...prev, { id: row.id, name: row.nombre, partySize: row.personas, createdAt: row.creado_en }]);
+      setWaitlist((prev) => [...prev, { ...mapEspera(row), phone: row.telefono || form.phone.trim() }]);
     } catch (err) {
       console.error(err);
-      setWaitlist((prev) => [...prev, { id: `local-${Date.now()}`, name: form.name, partySize: Number(form.partySize), createdAt: (/* @__PURE__ */ new Date()).toISOString() }]);
+      setWaitlist((prev) => [...prev, { id: `local-${Date.now()}`, name: form.name, partySize: Number(form.partySize), phone: form.phone.trim(), createdAt: (/* @__PURE__ */ new Date()).toISOString() }]);
     } finally {
       setSaving(false);
-      setForm({ name: "", partySize: "" });
+      setForm({ name: "", partySize: "", phone: "" });
     }
   };
   const handleRemove = async (id) => {
@@ -3341,7 +3507,11 @@ function WaitlistPanel({ waitlist, setWaitlist }) {
       console.error("No se pudo borrar de la lista de espera:", err);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Lista de espera"), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Se guardan en el orden en que se a\xF1aden."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "\xBFA nombre de qui\xE9n?" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Personas"), /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, style: styles.input, value: form.partySize, onChange: (e) => setForm({ ...form, partySize: e.target.value }) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleAdd, disabled: saving || !form.name.trim() || !form.partySize }, saving ? "A\xF1adiendo\u2026" : "A\xF1adir a la lista"), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "En espera (", waitlist.length, ")"), waitlist.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Nadie en espera ahora mismo.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, waitlist.map((w, i) => /* @__PURE__ */ React.createElement("div", { key: w.id, style: styles.resRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, i + 1, ". ", w.name), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, w.partySize, " personas")), /* @__PURE__ */ React.createElement("button", { onClick: () => handleRemove(w.id), style: styles.waitlistRemoveBtn }, "\u2715")))));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Lista de espera"), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Se guardan en el orden en que se a\xF1aden."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "\xBFA nombre de qui\xE9n?" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Personas"), /* @__PURE__ */ React.createElement("input", { type: "number", min: 1, style: styles.input, value: form.partySize, onChange: (e) => setForm({ ...form, partySize: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono (opcional, para avisarle por WhatsApp)"), /* @__PURE__ */ React.createElement("input", { type: "tel", style: styles.input, value: form.phone, onChange: (e) => setForm({ ...form, phone: e.target.value }) }), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleAdd, disabled: saving || !form.name.trim() || !form.partySize }, saving ? "A\xF1adiendo\u2026" : "A\xF1adir a la lista"), seatMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, color: "#8FBF9F", marginTop: 14 } }, seatMsg), /* @__PURE__ */ React.createElement("label", { style: { ...styles.label, marginTop: 20 } }, "En espera (", waitlist.length, ")"), waitlist.length === 0 ? /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Nadie en espera ahora mismo.") : /* @__PURE__ */ React.createElement("div", { style: styles.resListWrap }, waitlist.map((w, i) => {
+    const sug = sugById[w.id];
+    const wa = w.phone ? waLink(w.phone, `Hola ${w.name}, ya tenemos mesa para ${w.partySize} en ${BRAND_LOGO_ALT}. \xBFPuedes venir ya?`) : null;
+    return /* @__PURE__ */ React.createElement("div", { key: w.id, style: { ...styles.resRow, ...sug ? styles.waitRowFree : {}, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 160 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, i + 1, ". ", w.name), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, w.partySize, " personas", w.phone ? ` \xB7 ${w.phone}` : "", w.createdAt ? ` \xB7 espera ${timeAgo(w.createdAt)}` : ""), sug && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#8FBF9F" } }, "\u{1F4A1} Hay mesa: ", sug.area, " \xB7 ", sug.tableIds.length > 1 ? "mesas" : "mesa", " ", sug.tableIds.join(" + "), " (", sug.capacity, " plazas)")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, sug && /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: async () => setSeatMsg(await onSeat(sug)) }, "\u2713 Sentar ahora"), sug && wa && /* @__PURE__ */ React.createElement("a", { href: wa, target: "_blank", rel: "noreferrer", style: styles.alertLink }, "\u{1F4F2} Avisar"), /* @__PURE__ */ React.createElement("button", { onClick: () => handleRemove(w.id), style: styles.waitlistRemoveBtn }, "\u2715")));
+  })));
 }
 function ManualReservationPanel({
   areaTables,
@@ -3864,6 +4034,8 @@ const styles = {
   suggestDropdown: { position: "absolute", top: "100%", left: 0, right: 0, zIndex: 5, background: "#1F1D19", border: "1px solid #3A3833", borderRadius: 8, marginTop: 4, overflow: "hidden" },
   suggestItem: { display: "flex", justifyContent: "space-between", width: "100%", padding: "8px 12px", background: "transparent", border: "none", borderBottom: "1px solid #2A2822", color: "#F2EDE6", fontSize: 13, fontFamily: "system-ui, sans-serif", cursor: "pointer", textAlign: "left" },
   suggestItemMeta: { color: "#9C9488", fontSize: 12 },
+  waitHint: { display: "block", width: "100%", textAlign: "left", background: "#1E2A22", border: "1px solid #4C7A5C", color: "#8FBF9F", borderRadius: 10, padding: "10px 14px", margin: "8px 0", fontSize: 13, cursor: "pointer" },
+  waitRowFree: { border: "1px solid #4C7A5C", background: "#1A231D" },
   waitlistRemoveBtn: { background: "transparent", border: "none", color: "#9C9488", cursor: "pointer", fontSize: 16 },
   resListWrap: { display: "flex", flexDirection: "column", gap: 8, marginTop: 12 },
   resRow: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "#221E19", border: "1px solid #2A2822", borderRadius: 8, padding: "10px 12px" },
