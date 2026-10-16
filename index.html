@@ -1042,52 +1042,59 @@ function statusOfTable(tableId, reservations, date, slot) {
 function tableCenter(t) {
   return { x: t.x * 105 + 80, y: t.y * 115 + 70 };
 }
+const TABLE_STATUS_COLORS = {
+  libre: { rim: "#2B2118", chair: "#5A5247", chairBack: "#3F392F", g1: "#9A7852", g2: "#6A4E34" },
+  reservada: { rim: "#F0C76A", chair: "#D9A94F", chairBack: "#8F6F33", g1: "#E0B258", g2: "#A27624" },
+  llegada: { rim: "#7FD392", chair: "#4C9A5C", chairBack: "#2F6B3C", g1: "#63B574", g2: "#2F6B3C" },
+  pendiente: { rim: "#A8C6EE", chair: "#7FA6D9", chairBack: "#4A6F9E", g1: "#86AADB", g2: "#4A6C98" }
+};
+function tableGeometry(t, cx, cy) {
+  const n = Math.max(1, Math.min(Number(t.capacity) || 1, 12));
+  let kind, w, h, chairs = [];
+  const chair = (x, y, side) => chairs.push({ x, y, side });
+  if (n <= 2) {
+    kind = "square";
+    w = 54;
+    h = 54;
+    chair(cx - w / 2 - 15, cy, "w");
+    if (n === 2) chair(cx + w / 2 + 15, cy, "e");
+  } else if (n <= 4) {
+    kind = "circle";
+    w = 76;
+    h = 76;
+    const r = 38 + 15;
+    [[cx, cy - r, "n"], [cx, cy + r, "s"], [cx - r, cy, "w"], [cx + r, cy, "e"]].slice(0, n).forEach(([x, y, sd]) => chair(x, y, sd));
+  } else if (n <= 6) {
+    kind = "rect";
+    w = 132;
+    h = 56;
+    const top = Math.ceil(n / 2), bot = n - top;
+    for (let i = 0; i < top; i++) chair(cx - w / 2 + w * (i + 0.5) / top, cy - h / 2 - 15, "n");
+    for (let i = 0; i < bot; i++) chair(cx - w / 2 + w * (i + 0.5) / bot, cy + h / 2 + 15, "s");
+  } else {
+    kind = "rect";
+    w = 172;
+    h = 62;
+    const ends = n >= 8 ? 2 : 0;
+    const rest = n - ends, top = Math.ceil(rest / 2), bot = rest - top;
+    for (let i = 0; i < top; i++) chair(cx - w / 2 + w * (i + 0.5) / top, cy - h / 2 - 15, "n");
+    for (let i = 0; i < bot; i++) chair(cx - w / 2 + w * (i + 0.5) / bot, cy + h / 2 + 15, "s");
+    if (ends) {
+      chair(cx - w / 2 - 15, cy, "w");
+      chair(cx + w / 2 + 15, cy, "e");
+    }
+  }
+  return { kind, w, h, chairs };
+}
 function TableShape({ t, status, isSelected, editMode, onClick, onDragStart, badges }) {
   const { x: cx, y: cy } = tableCenter(t);
   const isPending = status === "pendiente";
-  const fill = status === "llegada" ? "#1E2E20" : status === "reservada" ? "#3A2E28" : isPending ? "#1D2733" : "#20211D";
-  const stroke = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : isPending ? "#7FA6D9" : "#4A473F";
-  const chairFill = status === "llegada" ? "#4C9A5C" : status === "reservada" ? "#C9A15A" : isPending ? "#7FA6D9" : "#4A473F";
-  let tableEl;
-  let chairs = [];
-  if (t.capacity <= 2) {
-    const r = 30;
-    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
-    chairs = [{ x: cx - r - 16, y: cy }, { x: cx + r + 16, y: cy }];
-  } else if (t.capacity <= 4) {
-    const r = 38;
-    tableEl = /* @__PURE__ */ React.createElement("circle", { cx, cy, r, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
-    chairs = [
-      { x: cx, y: cy - r - 16 },
-      { x: cx, y: cy + r + 16 },
-      { x: cx - r - 16, y: cy },
-      { x: cx + r + 16, y: cy }
-    ];
-  } else if (t.capacity <= 6) {
-    const w = 132, h = 56;
-    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
-    chairs = [
-      { x: cx - 36, y: cy - h / 2 - 16 },
-      { x: cx, y: cy - h / 2 - 16 },
-      { x: cx + 36, y: cy - h / 2 - 16 },
-      { x: cx - 36, y: cy + h / 2 + 16 },
-      { x: cx, y: cy + h / 2 + 16 },
-      { x: cx + 36, y: cy + h / 2 + 16 }
-    ];
-  } else {
-    const w = 172, h = 62;
-    tableEl = /* @__PURE__ */ React.createElement("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 10, fill, stroke, strokeWidth: 2, strokeDasharray: isPending ? "6 4" : void 0 });
-    chairs = [
-      { x: cx - 60, y: cy - h / 2 - 16 },
-      { x: cx - 20, y: cy - h / 2 - 16 },
-      { x: cx + 20, y: cy - h / 2 - 16 },
-      { x: cx + 60, y: cy - h / 2 - 16 },
-      { x: cx - 60, y: cy + h / 2 + 16 },
-      { x: cx - 20, y: cy + h / 2 + 16 },
-      { x: cx + 20, y: cy + h / 2 + 16 },
-      { x: cx + 60, y: cy + h / 2 + 16 }
-    ];
-  }
+  const col = TABLE_STATUS_COLORS[status] || TABLE_STATUS_COLORS.libre;
+  const { kind, w, h, chairs } = tableGeometry(t, cx, cy);
+  const gid = `wood-${status || "libre"}`;
+  const hw = w / 2, hh = h / 2;
+  const rx = kind === "square" ? 9 : 11;
+  const topShape = (extra) => kind === "circle" ? /* @__PURE__ */ React.createElement("circle", { cx, cy, r: hw, ...extra }) : /* @__PURE__ */ React.createElement("rect", { x: cx - hw, y: cy - hh, width: w, height: h, rx, ...extra });
   return /* @__PURE__ */ React.createElement(
     "g",
     {
@@ -1095,23 +1102,29 @@ function TableShape({ t, status, isSelected, editMode, onClick, onDragStart, bad
       onPointerDown: editMode ? onDragStart : void 0,
       style: { cursor: editMode ? "grab" : "pointer" }
     },
-    chairs.map((c, i) => /* @__PURE__ */ React.createElement("rect", { key: i, x: c.x - 7, y: c.y - 7, width: 14, height: 14, rx: 3, fill: chairFill, opacity: 0.8 })),
-    tableEl,
-    /* @__PURE__ */ React.createElement("text", { x: cx, y: cy - 3, textAnchor: "middle", fontSize: "17", fontWeight: "700", fill: "#F2EDE6", fontFamily: "system-ui, sans-serif" }, t.id),
-    /* @__PURE__ */ React.createElement("text", { x: cx, y: cy + 15, textAnchor: "middle", fontSize: "12", fill: "#9C9488", fontFamily: "system-ui, sans-serif" }, t.capacity, "p"),
+    /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: gid, x1: "0", y1: "0", x2: "1", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0%", stopColor: col.g1 }), /* @__PURE__ */ React.createElement("stop", { offset: "100%", stopColor: col.g2 }))),
+    kind === "circle" ? /* @__PURE__ */ React.createElement("circle", { cx: cx + 4, cy: cy + 6, r: hw + 2, fill: "#000", opacity: 0.38 }) : /* @__PURE__ */ React.createElement("rect", { x: cx - hw + 3, y: cy - hh + 6, width: w + 2, height: h + 2, rx: rx + 1, fill: "#000", opacity: 0.38 }),
+    chairs.map((c, i) => {
+      const back = c.side === "n" ? { x: c.x - 8, y: c.y - 10, w: 16, h: 4 } : c.side === "s" ? { x: c.x - 8, y: c.y + 6, w: 16, h: 4 } : c.side === "w" ? { x: c.x - 10, y: c.y - 8, w: 4, h: 16 } : { x: c.x + 6, y: c.y - 8, w: 4, h: 16 };
+      return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("rect", { x: c.x - 7 + 1, y: c.y - 7 + 2, width: 14, height: 14, rx: 4, fill: "#000", opacity: 0.3 }), /* @__PURE__ */ React.createElement("rect", { x: c.x - 7, y: c.y - 7, width: 14, height: 14, rx: 4, fill: col.chair }), /* @__PURE__ */ React.createElement("rect", { x: back.x, y: back.y, width: back.w, height: back.h, rx: 2, fill: col.chairBack }));
+    }),
+    topShape({ fill: `url(#${gid})`, stroke: col.rim, strokeWidth: status === "libre" ? 1.5 : 3, strokeDasharray: isPending ? "6 4" : void 0 }),
+    kind === "circle" ? /* @__PURE__ */ React.createElement("circle", { cx, cy, r: hw - 5, fill: "none", stroke: "#fff", strokeOpacity: 0.12, strokeWidth: 1.5 }) : /* @__PURE__ */ React.createElement("rect", { x: cx - hw + 5, y: cy - hh + 5, width: w - 10, height: h - 10, rx: Math.max(rx - 4, 3), fill: "none", stroke: "#fff", strokeOpacity: 0.12, strokeWidth: 1.5 }),
+    /* @__PURE__ */ React.createElement("text", { x: cx, y: cy - 2, textAnchor: "middle", fontSize: "17", fontWeight: "800", fill: "#FFF8EC", stroke: "#1A120A", strokeWidth: 3.2, paintOrder: "stroke", fontFamily: "system-ui, sans-serif" }, t.id),
+    /* @__PURE__ */ React.createElement("text", { x: cx, y: cy + 15, textAnchor: "middle", fontSize: "12", fontWeight: "600", fill: "#F1E4CE", stroke: "#1A120A", strokeWidth: 2.6, paintOrder: "stroke", fontFamily: "system-ui, sans-serif" }, t.capacity, "p"),
     badges && badges.length > 0 && /* @__PURE__ */ React.createElement(
       "text",
       {
-        x: t.capacity <= 2 ? cx + 24 : t.capacity <= 4 ? cx + 30 : cx + (t.capacity <= 6 ? 60 : 80),
-        y: t.capacity <= 2 ? cy - 24 : t.capacity <= 4 ? cy - 30 : cy - (t.capacity <= 6 ? 13 : 16),
-        textAnchor: t.capacity <= 4 ? "middle" : "end",
+        x: kind === "rect" ? cx + hw - 6 : cx + hw - 4,
+        y: cy - hh - (kind === "rect" ? 22 : 8),
+        textAnchor: "end",
         fontSize: "13",
         fontFamily: "system-ui, sans-serif"
       },
       badges.slice(0, 3).join("")
     ),
-    isSelected && /* @__PURE__ */ React.createElement("circle", { cx, cy, r: t.capacity <= 2 ? 50 : t.capacity <= 4 ? 58 : 100, fill: "none", stroke: "#C9A15A", strokeWidth: 2, strokeDasharray: "4 3" }),
-    editMode && /* @__PURE__ */ React.createElement("circle", { cx, cy, r: t.capacity <= 2 ? 42 : t.capacity <= 4 ? 48 : 80, fill: "none", stroke: "#6B6459", strokeWidth: 1, strokeDasharray: "2 4" })
+    isSelected && (kind === "circle" ? /* @__PURE__ */ React.createElement("circle", { cx, cy, r: hw + 22, fill: "none", stroke: "#E7C27A", strokeWidth: 2.5, strokeDasharray: "5 4" }) : /* @__PURE__ */ React.createElement("rect", { x: cx - hw - 24, y: cy - hh - 24, width: w + 48, height: h + 48, rx: rx + 14, fill: "none", stroke: "#E7C27A", strokeWidth: 2.5, strokeDasharray: "5 4" })),
+    editMode && (kind === "circle" ? /* @__PURE__ */ React.createElement("circle", { cx, cy, r: hw + 12, fill: "none", stroke: "#6B6459", strokeWidth: 1, strokeDasharray: "2 4" }) : /* @__PURE__ */ React.createElement("rect", { x: cx - hw - 20, y: cy - hh - 20, width: w + 40, height: h + 40, rx: rx + 10, fill: "none", stroke: "#6B6459", strokeWidth: 1, strokeDasharray: "2 4" }))
   );
 }
 function LoginScreen({ onLogin, busy, error }) {
@@ -3602,7 +3615,7 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
         }
       );
     })
-  )), /* @__PURE__ */ React.createElement("div", { style: styles.legend }, /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#20211D", border: "1px solid #4A473F" } }), " Libre"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#3A2E28", border: "1px solid #C9A15A" } }), " Reservada"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#1D2733", border: "1px dashed #7FA6D9" } }), " Pendiente de confirmar"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#C9A15A", opacity: 0.4, border: "none" } }), " Mesas combinadas"), /* @__PURE__ */ React.createElement("span", { style: styles.legendBrand }, "AKTEC Manager"))), /* @__PURE__ */ React.createElement("div", { style: styles.sidePanel }, mode === "manual" ? /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { style: styles.legend }, /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "linear-gradient(135deg,#9A7852,#6A4E34)", border: "1px solid #2B2118" } }), " Libre"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#B8883F", border: "2px solid #C9A15A" } }), " Reservada"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#5F7F9E", border: "2px dashed #7FA6D9" } }), " Pendiente de confirmar"), /* @__PURE__ */ React.createElement("span", { style: styles.legendItem }, /* @__PURE__ */ React.createElement("i", { style: { ...styles.dot, background: "#C9A15A", opacity: 0.4, border: "none" } }), " Mesas combinadas"), /* @__PURE__ */ React.createElement("span", { style: styles.legendBrand }, "AKTEC Manager"))), /* @__PURE__ */ React.createElement("div", { style: styles.sidePanel }, mode === "manual" ? /* @__PURE__ */ React.createElement(
     ManualReservationPanel,
     {
       areaTables,
