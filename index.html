@@ -3427,14 +3427,6 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   ), /* @__PURE__ */ React.createElement(
     "button",
     {
-      onClick: () => pausedNow ? onResume() : setConfirmPause((v) => !v),
-      "data-testid": "pause-btn",
-      style: { ...styles.editBtn, ...pausedNow ? { background: "#7A2E2E", color: "#fff", borderColor: "#8B4A3E" } : confirmPause ? styles.editBtnActive : {} }
-    },
-    pausedNow ? "\u25B6 Reanudar reservas online" : "\u23F8 Pausar reservas online"
-  ), /* @__PURE__ */ React.createElement(
-    "button",
-    {
       onClick: () => {
         setMode((m) => m === "espera" ? "none" : "espera");
         setSelectedTable(null);
@@ -3443,6 +3435,14 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       style: { ...styles.editBtn, ...mode === "espera" ? styles.editBtnActive : {} }
     },
     mode === "espera" ? "Cerrar lista de espera" : `Lista de espera${waitlist.length ? ` (${waitlist.length})` : ""}${waitSuggestions.length ? " \u{1F4A1}" : ""}`
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => pausedNow ? onResume() : setConfirmPause((v) => !v),
+      "data-testid": "pause-btn",
+      style: { ...styles.editBtn, fontWeight: 700, ...pausedNow ? { background: "#B3392F", color: "#fff", borderColor: "#D9534F" } : { background: "#E0A030", color: "#1A1408", borderColor: "#F0B840" }, ...confirmPause && !pausedNow ? { boxShadow: "0 0 0 2px #fff6" } : {} }
+    },
+    pausedNow ? "\u25B6 Reanudar reservas online" : "\u23F8 Pausar reservas online"
   )), pausedNow && /* @__PURE__ */ React.createElement("div", { "data-testid": "pause-banner", style: { ...styles.adviceBox, ...styles.adviceWarn, margin: "10px 0" } }, "\u23F8 ", /* @__PURE__ */ React.createElement("b", null, "Reservas online en pausa"), pausaHasta ? ` hasta ${pauseHourLabel(pausaHasta)}. Se reanudan solas a esa hora.` : ". Seguir\xE1n en pausa hasta que las reanudes.", /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.adviceSuggestBtn, onClick: onResume }, "\u25B6 Reanudar ahora"))), !pausedNow && confirmPause && /* @__PURE__ */ React.createElement("div", { "data-testid": "pause-confirm", style: { ...styles.adviceBox, ...styles.adviceOk, margin: "10px 0" } }, /* @__PURE__ */ React.createElement("b", null, "\u23F8 Pausar reservas online"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6, lineHeight: 1.5 } }, "\xB7 Si lo pulsas ", /* @__PURE__ */ React.createElement("b", null, "antes de las 18:00"), " (da igual la hora) \u2192 no se puede reservar online ", /* @__PURE__ */ React.createElement("b", null, "hasta las 18:00"), ".", /* @__PURE__ */ React.createElement("br", null), "\xB7 Si lo pulsas ", /* @__PURE__ */ React.createElement("b", null, "entre las 18:00 y las 00:00"), " \u2192 no se puede reservar online ", /* @__PURE__ */ React.createElement("b", null, "hasta las 00:00"), "."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, "Ahora son las ", /* @__PURE__ */ React.createElement("b", null, pauseHourLabel(Date.now()).replace("las ", "")), ": se pausar\xE1 ", /* @__PURE__ */ React.createElement("b", null, "hasta ", pauseHourLabel(pauseUntilFor(/* @__PURE__ */ new Date()))), "."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { type: "button", "data-testid": "pause-ok", style: styles.adviceSuggestBtn, onClick: async () => {
     await onPause();
     setConfirmPause(false);
