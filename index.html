@@ -939,6 +939,20 @@ function connectedCombos(freeTables, maxSize, adjacency) {
   }
   return results;
 }
+function pauseUntilFor(date) {
+  const d = new Date(date);
+  const until = new Date(d);
+  if (d.getHours() < 13) until.setHours(18, 0, 0, 0);
+  else {
+    until.setDate(until.getDate() + 1);
+    until.setHours(0, 0, 0, 0);
+  }
+  return until;
+}
+function pauseHourLabel(date) {
+  const d = new Date(date);
+  return d.getHours() === 0 && d.getMinutes() === 0 ? "las 00:00" : `las ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 function todayISO() {
   const d = /* @__PURE__ */ new Date();
   const off = d.getTimezoneOffset();
@@ -1221,6 +1235,9 @@ function AppMain({ auth, onSignOut }) {
   const [dbStatus, setDbStatus] = useState("cargando");
   const [zoneSettings, setZoneSettings] = useState({ Sala: true, Terraza: true });
   const [reservasPausadas, setReservasPausadas] = useState(false);
+  const [pausaHasta, setPausaHasta] = useState(null);
+  const [pausaError, setPausaError] = useState("");
+  const pausadasAhora = reservasPausadas && (!pausaHasta || clockNow.getTime() < pausaHasta);
   const [aprobacionManual, setAprobacionManual] = useState(false);
   const [ackedPendingIds, setAckedPendingIds] = useState(() => /* @__PURE__ */ new Set());
   const [openPendingRequest, setOpenPendingRequest] = useState(false);
@@ -1441,13 +1458,28 @@ function AppMain({ auth, onSignOut }) {
       handleNewReservations(mapped.filter((r) => !seenReservationIds.current.has(r.id)));
     }
   };
+  const loadConfig = async () => {
+    try {
+      return await sb("configuracion?select=id,sala_activa,terraza_activa,reservas_pausadas,aprobacion_manual,pausa_hasta&id=eq.1");
+    } catch (e) {
+      return sb("configuracion?select=id,sala_activa,terraza_activa,reservas_pausadas,aprobacion_manual&id=eq.1").catch(() => null);
+    }
+  };
+  const applyConfig = (config) => {
+    if (config && config[0]) {
+      setZoneSettings({ Sala: !!config[0].sala_activa, Terraza: !!config[0].terraza_activa });
+      setReservasPausadas(!!config[0].reservas_pausadas);
+      setPausaHasta(config[0].pausa_hasta ? new Date(config[0].pausa_hasta).getTime() : null);
+      setAprobacionManual(!!config[0].aprobacion_manual);
+    }
+  };
   useEffect(() => {
     (async () => {
       try {
         const [mesas, reservas, config, clientes, espera, adyacencia] = await Promise.all([
           sb("mesas?select=*"),
           loadReservas(),
-          sb("configuracion?select=id,sala_activa,terraza_activa,reservas_pausadas,aprobacion_manual&id=eq.1").catch(() => null),
+          loadConfig(),
           PUBLIC_MODE ? Promise.resolve(null) : sb("clientes?select=*&order=nombre.asc").catch(() => null),
           PUBLIC_MODE ? Promise.resolve(null) : sb("lista_espera?select=*&order=creado_en.asc").catch(() => null),
           sb("mesas_adyacencia?select=*").catch(() => null)
@@ -1470,11 +1502,7 @@ function AppMain({ auth, onSignOut }) {
         mapped.filter((r) => r.estado === "cancelada" && r.cancelReason === "cliente").forEach((r) => seenCancelIds.current.add(r.id));
         mapped.forEach((r) => seenReservationIds.current.add(r.id));
         seededReservations.current = true;
-        if (config && config[0]) {
-          setZoneSettings({ Sala: !!config[0].sala_activa, Terraza: !!config[0].terraza_activa });
-          setReservasPausadas(!!config[0].reservas_pausadas);
-          setAprobacionManual(!!config[0].aprobacion_manual);
-        }
+        applyConfig(config);
         if (clientes) {
           setClients(clientes.map((c) => ({ id: c.id, name: c.nombre, phone: c.telefono, postalCode: c.codigo_postal, allergies: c.alergias, preferredTable: c.mesa_preferida, birthday: c.cumpleanos, notes: c.notas })));
         }
@@ -1497,6 +1525,8 @@ function AppMain({ auth, onSignOut }) {
   useEffect(() => {
     const t = setInterval(() => {
       refreshReservations(false).catch((err) => console.error("No se pudo comprobar cancelaciones:", err));
+      loadConfig().then(applyConfig).catch(() => {
+      });
     }, 2e4);
     return () => clearInterval(t);
   }, []);
@@ -1569,12 +1599,47 @@ function AppMain({ auth, onSignOut }) {
     }
   };
   const toggleReservasPausadas = async () => {
-    const next = !reservasPausadas;
+    const next = !pausadasAhora;
     setReservasPausadas(next);
+    setPausaHasta(null);
     try {
-      await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: next }) });
+      try {
+        await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: next, pausa_hasta: null }) });
+      } catch (e0) {
+        await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: next }) });
+      }
     } catch (err) {
       console.error("No se pudo guardar el ajuste de pausa general:", err);
+    }
+  };
+  const pauseOnline = async () => {
+    const until = pauseUntilFor(/* @__PURE__ */ new Date());
+    setPausaError("");
+    try {
+      await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: true, pausa_hasta: until.toISOString() }) });
+      setReservasPausadas(true);
+      setPausaHasta(until.getTime());
+    } catch (err) {
+      console.error("No se pudo guardar la pausa:", err);
+      setPausaError("No se ha podido guardar la pausa. \xBFFalta ejecutar pausa_programada.sql en Supabase?");
+    }
+    return until;
+  };
+  const resumeOnline = async () => {
+    setPausaError("");
+    const prev = { r: reservasPausadas, h: pausaHasta };
+    setReservasPausadas(false);
+    setPausaHasta(null);
+    try {
+      await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: false, pausa_hasta: null }) });
+    } catch (err) {
+      try {
+        await sb("configuracion?id=eq.1", { method: "PATCH", body: JSON.stringify({ reservas_pausadas: false }) });
+      } catch (err2) {
+        setReservasPausadas(prev.r);
+        setPausaHasta(prev.h);
+        setPausaError("No se ha podido reanudar. Int\xE9ntalo otra vez.");
+      }
     }
   };
   const toggleAprobacionManual = async () => {
@@ -1814,7 +1879,7 @@ function AppMain({ auth, onSignOut }) {
       confirmed,
       saving,
       availableAreas,
-      reservasPausadas,
+      reservasPausadas: pausadasAhora,
       reservations,
       lang,
       setLang,
@@ -1844,6 +1909,11 @@ function AppMain({ auth, onSignOut }) {
       adjacency,
       zoneSettings,
       onOwnReservation: registerOwnReservation,
+      pausedNow: pausadasAhora,
+      pausaHasta,
+      pausaError,
+      onPause: pauseOnline,
+      onResume: resumeOnline,
       pendingReservations,
       onDecidePending: decidePending,
       onRejectAllPending: rejectAllPending,
@@ -1856,7 +1926,7 @@ function AppMain({ auth, onSignOut }) {
     {
       zoneSettings,
       onToggleZone: toggleZone,
-      reservasPausadas,
+      reservasPausadas: pausadasAhora,
       onToggleReservasPausadas: toggleReservasPausadas,
       aprobacionManual,
       onToggleAprobacionManual: toggleAprobacionManual,
@@ -2956,7 +3026,8 @@ function AdminMoveReservation({ tables, reservations, setReservations, onClose }
     /* @__PURE__ */ React.createElement("optgroup", { label: "Terraza" }, freeTables.filter((t) => t.area === "Terraza" && !destTables.includes(t.id)).map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " (", t.capacity, "p)")))
   ), destTables.length > 0 && destCapacity < selectedRes.partySize && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, "Ojo: ", destCapacity, " plazas no llegan para las ", selectedRes.partySize, " personas de la reserva."), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleMove, disabled: saving || destTables.length === 0 }, saving ? "Guardando\u2026" : "Mover reserva")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg))));
 }
-function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, zoneSettings, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed, rules }) {
+function StaffView({ tables, reservations, setReservations, slotReservations, selectedSlot, setSelectedSlot, selectedDate, setSelectedDate, clients, setClients, waitlist, setWaitlist, adjacency, zoneSettings, onOwnReservation, pendingReservations, onDecidePending, onRejectAllPending, openPendingRequest, onOpenPendingConsumed, rules, pausedNow, pausaHasta, pausaError, onPause, onResume }) {
+  const [confirmPause, setConfirmPause] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
   const decideAndClose = async (res, decision) => {
     await onDecidePending(res, decision);
@@ -3356,6 +3427,14 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   ), /* @__PURE__ */ React.createElement(
     "button",
     {
+      onClick: () => pausedNow ? onResume() : setConfirmPause((v) => !v),
+      "data-testid": "pause-btn",
+      style: { ...styles.editBtn, ...pausedNow ? { background: "#7A2E2E", color: "#fff", borderColor: "#8B4A3E" } : confirmPause ? styles.editBtnActive : {} }
+    },
+    pausedNow ? "\u25B6 Reanudar reservas online" : "\u23F8 Pausar reservas online"
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
       onClick: () => {
         setMode((m) => m === "espera" ? "none" : "espera");
         setSelectedTable(null);
@@ -3364,7 +3443,10 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       style: { ...styles.editBtn, ...mode === "espera" ? styles.editBtnActive : {} }
     },
     mode === "espera" ? "Cerrar lista de espera" : `Lista de espera${waitlist.length ? ` (${waitlist.length})` : ""}${waitSuggestions.length ? " \u{1F4A1}" : ""}`
-  )), mode !== "espera" && waitSuggestions.length > 0 && /* @__PURE__ */ React.createElement(
+  )), pausedNow && /* @__PURE__ */ React.createElement("div", { "data-testid": "pause-banner", style: { ...styles.adviceBox, ...styles.adviceWarn, margin: "10px 0" } }, "\u23F8 ", /* @__PURE__ */ React.createElement("b", null, "Reservas online en pausa"), pausaHasta ? ` hasta ${pauseHourLabel(pausaHasta)}. Se reanudan solas a esa hora.` : ". Seguir\xE1n en pausa hasta que las reanudes.", /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.adviceSuggestBtn, onClick: onResume }, "\u25B6 Reanudar ahora"))), !pausedNow && confirmPause && /* @__PURE__ */ React.createElement("div", { "data-testid": "pause-confirm", style: { ...styles.adviceBox, ...styles.adviceOk, margin: "10px 0" } }, /* @__PURE__ */ React.createElement("b", null, "\u23F8 Pausar reservas online"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 6, lineHeight: 1.5 } }, "\xB7 Si lo pulsas ", /* @__PURE__ */ React.createElement("b", null, "antes de las 13:00"), " \u2192 no se puede reservar online ", /* @__PURE__ */ React.createElement("b", null, "hasta las 18:00"), ".", /* @__PURE__ */ React.createElement("br", null), "\xB7 Si lo pulsas ", /* @__PURE__ */ React.createElement("b", null, "antes de las 19:00"), " \u2192 no se puede reservar online ", /* @__PURE__ */ React.createElement("b", null, "hasta las 00:00"), ".", /* @__PURE__ */ React.createElement("br", null), "\xB7 A partir de las 19:00 \u2192 tambi\xE9n hasta las 00:00."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, "Ahora son las ", /* @__PURE__ */ React.createElement("b", null, pauseHourLabel(Date.now()).replace("las ", "")), ": se pausar\xE1 ", /* @__PURE__ */ React.createElement("b", null, "hasta ", pauseHourLabel(pauseUntilFor(/* @__PURE__ */ new Date()))), "."), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10, display: "flex", gap: 8 } }, /* @__PURE__ */ React.createElement("button", { type: "button", "data-testid": "pause-ok", style: styles.adviceSuggestBtn, onClick: async () => {
+    await onPause();
+    setConfirmPause(false);
+  } }, "Pausar ahora"), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.editBtn, onClick: () => setConfirmPause(false) }, "Cancelar"))), pausaError && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, color: "#E8B4A8" } }, "\u26A0\uFE0F ", pausaError), mode !== "espera" && waitSuggestions.length > 0 && /* @__PURE__ */ React.createElement(
     "button",
     {
       style: styles.waitHint,
