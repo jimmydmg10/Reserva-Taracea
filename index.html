@@ -2242,7 +2242,7 @@ function AdminView({ zoneSettings, onToggleZone, reservasPausadas, onToggleReser
       style: { ...styles.areaChip, ...tab === t.id ? styles.areaChipActive : {} }
     },
     t.label
-  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }), tab === "limites" && /* @__PURE__ */ React.createElement(AdminLimits, { rules, setRules }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
+  )))), tab === "zonas" && /* @__PURE__ */ React.createElement(AdminZones, { zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }), tab === "limites" && /* @__PURE__ */ React.createElement(AdminLimits, { rules, setRules }), tab === "plano" && /* @__PURE__ */ React.createElement(AdminFloorEditor, { tables, setTables, reservations }), tab === "crear" && /* @__PURE__ */ React.createElement(AdminCreateTable, { tables, setTables, adjacency, setAdjacency, reservations }), tab === "informes" && /* @__PURE__ */ React.createElement(AdminReports, { reservations }), tab === "clientes" && /* @__PURE__ */ React.createElement(AdminClientStats, { reservations, clients }), tab === "stock" && /* @__PURE__ */ React.createElement(AdminStock, null));
 }
 function AdminZones({ zoneSettings, onToggleZone, reservasPausadas, onToggleReservasPausadas, aprobacionManual, onToggleAprobacionManual }) {
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: styles.formCard }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Zonas de reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Activa o desactiva zonas para las reservas de clientes (por ejemplo, cierra la terraza si hace mal tiempo)."), ["Sala", "Terraza"].map((zone) => /* @__PURE__ */ React.createElement("div", { key: zone, style: styles.zoneRow }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, zone), /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowMeta }, zoneSettings[zone] ? "Disponible para reservar" : "Cerrada para reservas")), /* @__PURE__ */ React.createElement(
@@ -2631,7 +2631,7 @@ function AdminReports({ reservations }) {
   const weakestIdx = monthCounts.indexOf(weakestCount);
   return /* @__PURE__ */ React.createElement("div", { style: styles.mainCentered }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, maxWidth: 620 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Informes"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("button", { style: styles.yearArrow, onClick: () => setYear((y) => y - 1) }, "\u2039"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 18 } }, year), /* @__PURE__ */ React.createElement("button", { style: styles.yearArrow, onClick: () => setYear((y) => y + 1) }, "\u203A"))), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Reservas hechas por mes (todas, aunque luego se cancelaran)."), /* @__PURE__ */ React.createElement("div", { style: styles.monthsGrid }, MONTH_NAMES.map((name, i) => /* @__PURE__ */ React.createElement("div", { key: name, style: { ...styles.monthCell, background: colorFor(monthCounts[i]) } }, /* @__PURE__ */ React.createElement("span", { style: styles.monthName }, name.slice(0, 3)), /* @__PURE__ */ React.createElement("span", { style: styles.monthCount }, monthCounts[i])))), maxCount > 0 && /* @__PURE__ */ React.createElement("p", { style: { ...styles.hint, marginTop: 14 } }, "Mes m\xE1s fuerte: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#8FBF9F" } }, MONTH_NAMES[strongestIdx]), " (", monthCounts[strongestIdx], " reservas)", nonZero.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 Mes m\xE1s flojo: ", /* @__PURE__ */ React.createElement("strong", { style: { color: "#E8B4A8" } }, MONTH_NAMES[weakestIdx]), " (", weakestCount, " reservas)")), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "Cancelaciones en ", year), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 24, marginTop: 8 } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelledByClient), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "cancel\xF3 el cliente")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelledByUs), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "cancelamos nosotros")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, cancelled.length), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "total canceladas")))), /* @__PURE__ */ React.createElement("div", { style: styles.cancelReportBox }, /* @__PURE__ */ React.createElement("p", { style: styles.zoneRowTitle }, "No presentados en ", year), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyNumbers }, noShows), /* @__PURE__ */ React.createElement("p", { style: styles.occupancyPct }, "reservas donde el cliente no se present\xF3"))));
 }
-function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
+function AdminCreateTable({ tables, setTables, adjacency, setAdjacency, reservations }) {
   const [form, setForm] = useState({ id: "", capacity: "", area: "Sala" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2641,6 +2641,43 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
   const [comboChain, setComboChain] = useState(["", "", "", "", "", ""]);
   const [comboMsg, setComboMsg] = useState("");
   const [comboSaving, setComboSaving] = useState(false);
+  const [capArea, setCapArea] = useState("Sala");
+  const [capTable, setCapTable] = useState("");
+  const [capValue, setCapValue] = useState("");
+  const [capMsg, setCapMsg] = useState("");
+  const [capSaving, setCapSaving] = useState(false);
+  const capTables = tables.filter((t) => t.area === capArea).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "es", { numeric: true }));
+  const capSelected = tables.find((t) => t.id === capTable);
+  const capFuture = capSelected ? (reservations || []).filter((r) => (r.tableIds || []).includes(capSelected.id) && (r.estado === "activa" || r.estado === "pendiente") && r.date >= todayISO()) : [];
+  const capNew = Number(capValue);
+  const capBigger = capSelected && capNew > 0 ? capFuture.filter((r) => (r.tableIds || []).length === 1 && Number(r.partySize) > capNew) : [];
+  const handleChangeCapacity = async () => {
+    setCapMsg("");
+    if (!capSelected) {
+      setCapMsg("\u26A0\uFE0F Elige una mesa.");
+      return;
+    }
+    if (!Number.isInteger(capNew) || capNew < 1 || capNew > 40) {
+      setCapMsg("\u26A0\uFE0F Pon un n\xFAmero de personas entre 1 y 40.");
+      return;
+    }
+    if (capNew === capSelected.capacity) {
+      setCapMsg("Esa mesa ya tiene esa capacidad.");
+      return;
+    }
+    setCapSaving(true);
+    try {
+      await sb(`mesas?id=eq.${encodeURIComponent(capSelected.id)}`, { method: "PATCH", body: JSON.stringify({ capacidad: capNew }) });
+      setTables((prev) => prev.map((t) => t.id === capSelected.id ? { ...t, capacity: capNew } : t));
+      setCapMsg(`\u2713 Mesa ${capSelected.id}: de ${capSelected.capacity} a ${capNew} personas.`);
+      setCapValue("");
+    } catch (err) {
+      console.error(err);
+      setCapMsg("\u26A0\uFE0F No se pudo guardar en la base de datos (sin conexi\xF3n). Int\xE9ntalo de nuevo.");
+    } finally {
+      setCapSaving(false);
+    }
+  };
   const handleCreate = async () => {
     setError("");
     const name = form.id.trim();
@@ -2809,7 +2846,45 @@ function AdminCreateTable({ tables, setTables, adjacency, setAdjacency }) {
       value: form.capacity,
       onChange: (e) => setForm({ ...form, capacity: e.target.value })
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Combinaciones de mesas"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Marca qu\xE9 mesas est\xE1n f\xEDsicamente juntas, en fila, y se pueden combinar para grupos grandes (hasta 6 mesas seguidas)."), /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Zona"), /* @__PURE__ */ React.createElement("select", { style: styles.input, value: form.area, onChange: (e) => setForm({ ...form, area: e.target.value }) }, /* @__PURE__ */ React.createElement("option", { value: "Sala" }, "Sala"), /* @__PURE__ */ React.createElement("option", { value: "Terraza" }, "Terraza")), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorBox }, error), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: handleCreate, disabled: saving }, saving ? "Creando\u2026" : "Crear mesa"), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: "#8FBF9F" } }, msg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Cambiar personas que caben en una mesa"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Para cuando una mesa ahora es m\xE1s grande o m\xE1s peque\xF1a. Elige la mesa y pon la capacidad nueva."), /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: a,
+      onClick: () => {
+        setCapArea(a);
+        setCapTable("");
+        setCapValue("");
+        setCapMsg("");
+      },
+      style: { ...styles.areaChip, ...a === capArea ? styles.areaChipActive : {} }
+    },
+    a
+  ))), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Mesa"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      "data-testid": "cap-table",
+      style: styles.input,
+      value: capTable,
+      onChange: (e) => {
+        setCapTable(e.target.value);
+        setCapValue("");
+        setCapMsg("");
+      }
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Elige una mesa \u2014"),
+    capTables.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.id, " \xB7 caben ", t.capacity))
+  ), capSelected && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Ahora caben ", /* @__PURE__ */ React.createElement("b", null, capSelected.capacity), " personas en la mesa ", capSelected.id, "."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F465}"), "Capacidad nueva (personas)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      "data-testid": "cap-value",
+      type: "number",
+      min: 1,
+      style: styles.input,
+      value: capValue,
+      onChange: (e) => setCapValue(e.target.value),
+      placeholder: String(capSelected.capacity)
+    }
+  ), capBigger.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { ...styles.adviceBox, ...styles.adviceWarn } }, "\u26A0\uFE0F Esta mesa tiene ", capBigger.length, " reserva", capBigger.length > 1 ? "s" : "", " pr\xF3xima", capBigger.length > 1 ? "s" : "", " de m\xE1s de ", capNew, " personas (", capBigger.slice(0, 3).map((r) => `${r.name} \xB7 ${r.partySize}p \xB7 ${formatDateEs(r.date)} ${r.slot}`).join("; "), capBigger.length > 3 ? "\u2026" : "", "). No se cambian solas: rev\xEDsalas si reduces la capacidad."), /* @__PURE__ */ React.createElement("button", { "data-testid": "cap-save", style: styles.primaryBtn, onClick: handleChangeCapacity, disabled: capSaving || !capValue }, capSaving ? "Guardando\u2026" : "Guardar capacidad")), capMsg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10, color: capMsg.startsWith("\u26A0\uFE0F") ? "#E8B4A8" : "#8FBF9F" } }, capMsg)), /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, marginTop: 20 } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Combinaciones de mesas"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Marca qu\xE9 mesas est\xE1n f\xEDsicamente juntas, en fila, y se pueden combinar para grupos grandes (hasta 6 mesas seguidas)."), /* @__PURE__ */ React.createElement("div", { style: styles.areaPicker }, ["Sala", "Terraza"].map((a) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: a,
