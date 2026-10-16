@@ -2987,6 +2987,24 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
   };
   const [manualSelected, setManualSelected] = useState([]);
   const [manualForm, setManualForm] = useState({ name: "", phone: "", email: "", partySize: "" });
+  const handleVoiceFill = (text) => {
+    const p = parseVoiceReservation(text, { slots: TIME_SLOTS, today: todayISO() });
+    const summary = voiceSummary(p);
+    if (!summary) return "";
+    setManualForm((f) => ({
+      name: p.name != null ? p.name : f.name,
+      phone: p.phone != null ? p.phone : f.phone,
+      email: p.email != null ? p.email : f.email,
+      partySize: p.partySize != null ? String(p.partySize) : f.partySize
+    }));
+    if (p.date) setSelectedDate(p.date);
+    if (p.slot) setSelectedSlot(p.slot);
+    if (p.area) {
+      setArea(p.area);
+      setManualSelected([]);
+    }
+    return summary;
+  };
   const [manualSaving, setManualSaving] = useState(false);
   const [manualMsg, setManualMsg] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -3442,7 +3460,8 @@ function StaffView({ tables, reservations, setReservations, slotReservations, se
       reservations,
       onToggleTable: toggleManualTable,
       onConfirm: handleManualConfirm,
-      onUseSuggestion: (fit) => setManualSelected(fit.tableIds)
+      onUseSuggestion: (fit) => setManualSelected(fit.tableIds),
+      onVoice: handleVoiceFill
     }
   ) : mode === "ficha" ? /* @__PURE__ */ React.createElement(ClientProfilePanel, { clients, setClients }) : mode === "espera" ? /* @__PURE__ */ React.createElement(WaitlistPanel, { waitlist, setWaitlist, suggestions: waitSuggestions, onSeat: handleSeatFromWaitlist }) : selectedTable ? /* @__PURE__ */ React.createElement(TableDetail, { table: selectedTable, now, reservations, clients, onDecide: decideAndClose, onMarkArrived: handleMarkArrived, onFinish: handleFinishReservation, onCancel: handleCancelReservation, onNoShow: handleNoShow }) : /* @__PURE__ */ React.createElement(ReservationList, { slotReservations, selectedSlot }))));
 }
@@ -3513,6 +3532,303 @@ function WaitlistPanel({ waitlist, setWaitlist, suggestions, onSeat }) {
     return /* @__PURE__ */ React.createElement("div", { key: w.id, style: { ...styles.resRow, ...sug ? styles.waitRowFree : {}, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 160 } }, /* @__PURE__ */ React.createElement("p", { style: styles.resRowName }, i + 1, ". ", w.name), /* @__PURE__ */ React.createElement("p", { style: styles.resRowMeta }, w.partySize, " personas", w.phone ? ` \xB7 ${w.phone}` : "", w.createdAt ? ` \xB7 espera ${timeAgo(w.createdAt)}` : ""), sug && /* @__PURE__ */ React.createElement("p", { style: { ...styles.resRowMeta, color: "#8FBF9F" } }, "\u{1F4A1} Hay mesa: ", sug.area, " \xB7 ", sug.tableIds.length > 1 ? "mesas" : "mesa", " ", sug.tableIds.join(" + "), " (", sug.capacity, " plazas)")), /* @__PURE__ */ React.createElement("div", { style: styles.pendingBtns }, sug && /* @__PURE__ */ React.createElement("button", { style: styles.alertBtnOk, onClick: async () => setSeatMsg(await onSeat(sug)) }, "\u2713 Sentar ahora"), sug && wa && /* @__PURE__ */ React.createElement("a", { href: wa, target: "_blank", rel: "noreferrer", style: styles.alertLink }, "\u{1F4F2} Avisar"), /* @__PURE__ */ React.createElement("button", { onClick: () => handleRemove(w.id), style: styles.waitlistRemoveBtn }, "\u2715")));
   })));
 }
+const VOICE_NUMS = {
+  un: 1,
+  uno: 1,
+  una: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  once: 11,
+  doce: 12,
+  trece: 13,
+  catorce: 14,
+  quince: 15,
+  dieciseis: 16,
+  diecisiete: 17,
+  dieciocho: 18,
+  diecinueve: 19,
+  veinte: 20,
+  veintiuno: 21,
+  veintidos: 22,
+  veintitres: 23,
+  veinticuatro: 24,
+  veinticinco: 25,
+  treinta: 30,
+  cuarenta: 40
+};
+const VOICE_DIGITS = { cero: 0, uno: 1, un: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9 };
+const VOICE_MONTHS = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
+const VOICE_WEEKDAYS = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
+function voiceNormalize(s) {
+  const map = { \u00E1: "a", \u00E0: "a", \u00E4: "a", \u00E9: "e", \u00E8: "e", \u00EB: "e", \u00ED: "i", \u00EC: "i", \u00EF: "i", \u00F3: "o", \u00F2: "o", \u00F6: "o", \u00FA: "u", \u00F9: "u", \u00FC: "u", \u00F1: "n" };
+  return s.toLowerCase().replace(/[áàäéèëíìïóòöúùüñ]/g, (c) => map[c]);
+}
+function voiceAddDays(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+}
+function voiceNum(tok) {
+  if (/^\d+$/.test(tok)) return Number(tok);
+  return VOICE_NUMS[tok] != null ? VOICE_NUMS[tok] : null;
+}
+function parseVoiceReservation(text, opts = {}) {
+  const slots = opts.slots || [];
+  const today = opts.today;
+  const orig = String(text || "");
+  let t = voiceNormalize(orig);
+  const out = {};
+  const take = (re, fn) => {
+    const m = re.exec(t);
+    if (!m) return false;
+    fn(m);
+    t = t.slice(0, m.index) + " ".repeat(m[0].length) + t.slice(m.index + m[0].length);
+    return true;
+  };
+  take(/([a-z0-9._-]+(?:\s+(?:guion bajo|guion|punto)\s+[a-z0-9]+)*)\s*(?:arroba|@)\s*([a-z0-9-]+(?:\s*(?:punto|\.)\s*[a-z0-9]+)+)/, (m) => {
+    const fix = (s) => s.replace(/\s*guion bajo\s*/g, "_").replace(/\s*guion\s*/g, "-").replace(/\s*punto\s*/g, ".").replace(/\s+/g, "");
+    out.email = fix(m[1]) + "@" + fix(m[2]);
+  });
+  let wordsToDigits = t.replace(/\b(?:(?:cero|uno|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b\s*){6,}/g, (run) => " " + run.trim().split(/\s+/).map((w) => VOICE_DIGITS[w]).join("") + " ");
+  if (wordsToDigits !== t) {
+    t = wordsToDigits;
+  }
+  take(/(?:\+?\s*34[\s.-]?)?(?:\d[\s.-]?){9,}/, (m) => {
+    let d = m[0].replace(/\D/g, "");
+    if (d.length === 11 && d.startsWith("34")) d = d.slice(2);
+    out.phone = d.slice(-9);
+  });
+  if (/\bterraza\b/.test(t)) {
+    out.area = "Terraza";
+    t = t.replace(/\b(en la |en )?terraza\b/, (x) => " ".repeat(x.length));
+  } else if (/\b(sala|interior|dentro)\b/.test(t)) {
+    out.area = "Sala";
+    t = t.replace(/\b(en la |en el |en )?(sala|interior|dentro)\b/, (x) => " ".repeat(x.length));
+  }
+  const todayISO2 = today || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const [ty, tm, td] = todayISO2.split("-").map(Number);
+  const wd = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay();
+  let dateDone = take(/\bpasado\s+manana\b/, () => {
+    out.date = voiceAddDays(todayISO2, 2);
+  }) || take(/\b(?:para |de )?manana\b(?!\s+(?:por la|de la)\s+(?:manana|tarde|noche))/, () => {
+    out.date = voiceAddDays(todayISO2, 1);
+  }) || take(/\b(?:para |de )?hoy\b|\besta noche\b|\besta tarde\b|\besta (?:manana|comida)\b/, (m) => {
+    out.date = todayISO2;
+    if (/noche/.test(m[0])) out.meal = "cena";
+  });
+  if (!dateDone) {
+    dateDone = take(/\b(?:el\s+)?(?:dia\s+)?(\d{1,2})\s*(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?\b/, (m) => {
+      const mo = VOICE_MONTHS[m[2]];
+      let y = m[3] ? Number(m[3]) : ty;
+      const cand = `${y}-${String(mo).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}`;
+      out.date = !m[3] && cand < todayISO2 ? `${y + 1}-${String(mo).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}` : cand;
+    }) || take(/\b(\d{1,2})\s*[\/-]\s*(\d{1,2})(?:\s*[\/-]\s*(\d{2,4}))?\b/, (m) => {
+      let y = m[3] ? Number(m[3]) : ty;
+      if (y < 100) y += 2e3;
+      const cand = `${y}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}`;
+      out.date = !m[3] && cand < todayISO2 ? `${y + 1}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}` : cand;
+    }) || take(/\b(?:el\s+)?(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b(?:\s+que viene|\s+proximo)?/, (m) => {
+      let diff = (VOICE_WEEKDAYS[m[1]] - wd + 7) % 7;
+      if (/que viene|proximo/.test(m[0]) && diff === 0) diff = 7;
+      out.date = voiceAddDays(todayISO2, diff);
+    }) || take(/\b(?:el\s+dia|el|dia)\s+(\d{1,2})\b(?!\s*(?:personas|:|\.))/, (m) => {
+      const dd = Number(m[1]);
+      if (dd < 1 || dd > 31) return;
+      let y = ty, mo = tm;
+      let cand = `${y}-${String(mo).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+      if (cand < todayISO2) {
+        mo += 1;
+        if (mo > 12) {
+          mo = 1;
+          y += 1;
+        }
+        cand = `${y}-${String(mo).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+      }
+      out.date = cand;
+    });
+  }
+  const mealMorning = /de la manana/.test(t);
+  const afterHour = (h, extra, hasPeriod) => {
+    let hh = h, mm = 0;
+    if (extra) {
+      if (/^y\s+media$/.test(extra)) mm = 30;
+      else if (/^y\s+cuarto$/.test(extra)) mm = 15;
+      else if (/^menos\s+cuarto$/.test(extra)) {
+        mm = 45;
+        hh = h - 1;
+      } else if (/^menos\s+veinte$/.test(extra)) {
+        mm = 40;
+        hh = h - 1;
+      } else if (/^menos\s+diez$/.test(extra)) {
+        mm = 50;
+        hh = h - 1;
+      } else if (/^y\s+veinte$/.test(extra)) mm = 20;
+      else if (/^y\s+diez$/.test(extra)) mm = 10;
+      else if (/^y\s+veinticinco$/.test(extra)) mm = 25;
+      else {
+        const n = extra.match(/(\d{2})/);
+        if (n) mm = Number(n[1]);
+      }
+    }
+    return [hh, mm];
+  };
+  let hm = null;
+  take(/\b(?:a|sobre|para)\s+la(?:s)?\s+(\d{1,2}|[a-z]+)(?:\s*[:.h]\s*(\d{2})|\s+(y\s+media|y\s+cuarto|menos\s+cuarto|y\s+veinte|menos\s+veinte|y\s+diez|menos\s+diez|y\s+veinticinco)|\s+y\s+(\d{2}))?(?:\s+horas)?(?:\s+de la\s+(manana|tarde|noche))?/, (m) => {
+    const h = voiceNum(m[1]);
+    if (h == null || h > 24) {
+      hm = null;
+      return;
+    }
+    let [hh, mm] = afterHour(h, m[3] || (m[2] || m[4] ? ":" + (m[2] || m[4]) : ""));
+    hm = { hh, mm, period: m[5] || (mealMorning ? "manana" : null) };
+  });
+  if (!hm) {
+    take(/\b(\d{1,2})\s*[:.h]\s*(\d{2})\b/, (m) => {
+      hm = { hh: Number(m[1]), mm: Number(m[2]), period: null };
+    });
+  }
+  if (!hm) {
+    take(/\b(?:a )?(?:las )?(\d{1,2})\s*(?:de la\s+)?(noche|tarde)\b/, (m) => {
+      hm = { hh: Number(m[1]), mm: 0, period: m[2] };
+    });
+  }
+  if (hm) {
+    let { hh, mm, period } = hm;
+    if (hh === 0 && mm === 0) hh = 24;
+    if (period === "noche" || period === "tarde") {
+      if (hh < 12) hh += 12;
+    } else if (period === "manana") {
+    } else if (hh >= 1 && hh <= 11) hh += 12;
+    const total = hh % 24 * 60 + mm;
+    out.time = `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  } else if (/\b(mediodia|comer|comida|almuerzo)\b/.test(t)) out.meal = "comida";
+  else if (/\b(cenar|cena|noche)\b/.test(t) || out.meal === "cena") out.meal = "cena";
+  if (!out.time && out.meal) {
+    out.time = out.meal === "comida" ? "14:00" : "21:00";
+    out.timeGuessed = true;
+  }
+  if (out.time && slots.length) {
+    const toMin = (s) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+    const want = toMin(out.time);
+    let best = slots[0];
+    for (const s of slots) if (Math.abs(toMin(s) - want) < Math.abs(toMin(best) - want)) best = s;
+    out.slot = best;
+    out.slotExact = best === out.time;
+  }
+  delete out.meal;
+  const numTok = "(\\d{1,2}|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|veinte|veintiuno|veintidos|veintitres|veinticuatro|veinticinco|treinta|cuarenta)";
+  take(new RegExp("\\b(?:somos|seremos|vamos|vienen|venimos)\\s+(?:unos\\s+)?" + numTok + "\\b"), (m) => {
+    out.partySize = voiceNum(m[1]);
+  }) || take(new RegExp("\\b" + numTok + "\\s+(?:personas?|comensales?|pax|adultos?|gente|ninos?)\\b"), (m) => {
+    out.partySize = voiceNum(m[1]);
+  }) || take(new RegExp("\\b(?:mesa|reserva|reservar)\\s+(?:para|de)\\s+" + numTok + "\\b"), (m) => {
+    out.partySize = voiceNum(m[1]);
+  }) || take(new RegExp("\\bpara\\s+" + numTok + "\\b"), (m) => {
+    out.partySize = voiceNum(m[1]);
+  });
+  const STOP = "(?:telefono|tel|tlf|tfno|telf|movil|numero|email|correo|correo electronico|para|somos|con|en|el|la|los|a las|a la|mesa|reserva|manana|hoy|pasado|esta|terraza|sala|dia|\\d)";
+  let nameRe = new RegExp("\\b(?:a nombre de|a nombre|de parte de|se llama|llamado|llamada|nombre)\\s+([a-z\xF1]+(?:\\s+(?!" + STOP + "\\b)[a-z\xF1]+){0,3})");
+  let nm = nameRe.exec(t);
+  let name = null;
+  if (nm) name = orig.substr(nm.index + nm[0].length - nm[1].length, nm[1].length);
+  else {
+    const FILL = new Set("hola buenas buenos dias tardes noches quiero quisiera queria necesito pon ponme anota apunta apuntame reservar reserva reservame mesa una un unas para por favor que de la las el los a en y con es me me al del lo mi nuestra nuestro seria seran vale gracias personas persona comensales somos van vienen telefono tel tlf tfno telf movil numero email correo hora hoy manana pasado esta noche tarde dia comer comida cenar cena almuerzo mediodia".split(" "));
+    const words = [];
+    const re = /[a-zñ]+/g;
+    let w;
+    while (w = re.exec(t)) if (!FILL.has(w[0]) && !VOICE_NUMS[w[0]]) words.push(orig.substr(w.index, w[0].length));
+    if (words.length && words.length <= 4) name = words.join(" ");
+  }
+  if (name) out.name = name.trim().split(/\s+/).map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(" ");
+  if (out.partySize != null && (out.partySize < 1 || out.partySize > 60)) delete out.partySize;
+  return out;
+}
+function voiceSummary(p) {
+  const bits = [];
+  if (p.name) bits.push(p.name);
+  if (p.partySize) bits.push(`${p.partySize} personas`);
+  if (p.date) {
+    const [y, m, d] = p.date.split("-");
+    bits.push(`${d}/${m}/${y}`);
+  }
+  if (p.slot) bits.push(p.slotExact === false ? `${p.slot} (la m\xE1s cercana a ${p.time})` : p.slot);
+  if (p.area) bits.push(p.area);
+  if (p.phone) bits.push(`tel. ${p.phone}`);
+  if (p.email) bits.push(p.email);
+  return bits.join(" \xB7 ");
+}
+function VoiceDictation({ onText }) {
+  const SR = typeof window !== "undefined" ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState("");
+  const [typed, setTyped] = useState("");
+  const [msg, setMsg] = useState("");
+  const recRef = useRef(null);
+  const apply = (text) => {
+    const clean = (text || "").trim();
+    if (!clean) return;
+    const summary = onText(clean);
+    setMsg(summary ? `\u2713 Rellenado: ${summary}` : "\u26A0\uFE0F No he entendido nada \xFAtil. Prueba: \xABmesa para 4 ma\xF1ana a las 9 a nombre de Juan, tel\xE9fono 600 123 456\xBB.");
+  };
+  const toggle = () => {
+    if (listening && recRef.current) {
+      recRef.current.stop();
+      return;
+    }
+    setMsg("");
+    setHeard("");
+    const rec = new SR();
+    rec.lang = "es-ES";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    let finalText = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tr2 = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += " " + tr2;
+        else interim += tr2;
+      }
+      setHeard((finalText + " " + interim).trim());
+    };
+    rec.onerror = (e) => {
+      setMsg(e.error === "not-allowed" || e.error === "service-not-allowed" ? "\u26A0\uFE0F El navegador no tiene permiso para el micr\xF3fono. Act\xEDvalo en los ajustes del sitio." : e.error === "no-speech" ? "No te he o\xEDdo. Int\xE9ntalo otra vez." : `\u26A0\uFE0F Error de voz (${e.error}).`);
+    };
+    rec.onend = () => {
+      setListening(false);
+      if (finalText.trim()) apply(finalText);
+    };
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch (err) {
+      setMsg("\u26A0\uFE0F No se pudo iniciar el micr\xF3fono.");
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", { style: { margin: "12px 0", padding: 12, border: "1px dashed #3A3833", borderRadius: 10 } }, SR ? /* @__PURE__ */ React.createElement("button", { type: "button", "data-testid": "voice-btn", style: { ...styles.editBtn, width: "100%", background: listening ? "#7A2E2E" : "transparent" }, onClick: toggle }, listening ? "\u23F9 Escuchando\u2026 (toca para parar)" : "\u{1F3A4} Dictar reserva") : /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Este navegador no tiene dictado integrado. Usa el micr\xF3fono del teclado del m\xF3vil en el cuadro de abajo."), heard && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 8 } }, "\u{1F5E3} \xAB", heard, "\xBB"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8 } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      style: { ...styles.input, margin: 0, flex: 1 },
+      value: typed,
+      onChange: (e) => setTyped(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") {
+          apply(typed);
+        }
+      },
+      placeholder: "O escribe / dicta con el teclado: mesa para 4 ma\xF1ana a las 9, Juan\u2026"
+    }
+  ), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.editBtn, onClick: () => apply(typed) }, "Rellenar")), msg && /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 8, color: msg.startsWith("\u26A0\uFE0F") ? "#E8B4A8" : "#8FBF9F" } }, msg));
+}
 function ManualReservationPanel({
   areaTables,
   manualSelected,
@@ -3526,7 +3842,8 @@ function ManualReservationPanel({
   reservations,
   onToggleTable,
   onConfirm,
-  onUseSuggestion
+  onUseSuggestion,
+  onVoice
 }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestions = manualForm.name.trim().length > 0 ? (clients || []).filter((c) => c.name.toLowerCase().includes(manualForm.name.trim().toLowerCase())).slice(0, 5) : [];
@@ -3538,7 +3855,7 @@ function ManualReservationPanel({
     setManualForm({ ...manualForm, name: c.name, phone: c.phone || manualForm.phone });
     setShowSuggestions(false);
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Reserva manual"), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Toca las mesas del plano para a\xF1adirlas o quitarlas."), manualSelected.length > 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.manualSelectedBox }, manualSelected.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, style: styles.tableTag }, id)), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xB7 ", manualCapacity, " plazas", comboBonusCapacity(manualSelected) > 0 && ` (incluye ${comboBonusCapacity(manualSelected)} silla${comboBonusCapacity(manualSelected) > 1 ? "s" : ""} de cabecera)`)) : /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10 } }, "Ninguna mesa seleccionada todav\xEDa."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { style: styles.panelTitle }, "Reserva manual"), /* @__PURE__ */ React.createElement("p", { style: styles.panelMeta }, "Toca las mesas del plano para a\xF1adirlas o quitarlas."), onVoice && /* @__PURE__ */ React.createElement(VoiceDictation, { onText: onVoice }), manualSelected.length > 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.manualSelectedBox }, manualSelected.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, style: styles.tableTag }, id)), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xB7 ", manualCapacity, " plazas", comboBonusCapacity(manualSelected) > 0 && ` (incluye ${comboBonusCapacity(manualSelected)} silla${comboBonusCapacity(manualSelected) > 1 ? "s" : ""} de cabecera)`)) : /* @__PURE__ */ React.createElement("p", { style: { ...styles.panelMeta, marginTop: 10 } }, "Ninguna mesa seleccionada todav\xEDa."), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("div", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement(
     "input",
     {
       style: styles.input,
