@@ -2647,7 +2647,14 @@ function AdminReports({ reservations }) {
 }
 const PRE_OFFER_LABELS = { menu: "Men\xFA", carta: "Carta", ambos: "Men\xFA y carta" };
 function parsePreReserva(text, today) {
-  const raw = String(text || "");
+  let raw = String(text || "");
+  let notas = null;
+  const nm = /\bnotas?\b\s*[:,\-]?\s*/i.exec(raw);
+  if (nm) {
+    notas = raw.slice(nm.index + nm[0].length).trim();
+    raw = raw.slice(0, nm.index);
+    if (notas) notas = notas.charAt(0).toUpperCase() + notas.slice(1);
+  }
   const n = voiceNormalize(raw);
   let oferta = null;
   if (/\b(las dos|los dos|ambas|ambos|menu y carta|carta y menu|menu y la carta|carta y el menu|las 2)\b/.test(n) || /\bmenu\b/.test(n) && /\bcarta\b/.test(n)) oferta = "ambos";
@@ -2661,10 +2668,11 @@ function parsePreReserva(text, today) {
   if (p.partySize) out.partySize = p.partySize;
   if (p.date) out.date = p.date;
   if (oferta) out.oferta = oferta;
+  if (notas) out.notas = notas;
   return out;
 }
 function AdminPreReserva() {
-  const [form, setForm] = useState({ name: "", phone: "", partySize: "", oferta: "", date: todayISO() });
+  const [form, setForm] = useState({ name: "", phone: "", partySize: "", notas: "", oferta: "", date: todayISO() });
   const [list, setList] = useState([]);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -2695,11 +2703,13 @@ function AdminPreReserva() {
     if (p.partySize) bits.push(`${p.partySize} personas`);
     if (p.oferta) bits.push(PRE_OFFER_LABELS[p.oferta]);
     if (p.date) bits.push(formatDateEs(p.date));
+    if (p.notas) bits.push(`nota: ${p.notas.length > 40 ? p.notas.slice(0, 40) + "\u2026" : p.notas}`);
     if (!bits.length) return "";
     setForm((f) => ({
       name: p.name != null ? p.name : f.name,
       phone: p.phone != null ? p.phone : f.phone,
       partySize: p.partySize != null ? String(p.partySize) : f.partySize,
+      notas: p.notas != null ? f.notas ? f.notas + " " + p.notas : p.notas : f.notas,
       oferta: p.oferta != null ? p.oferta : f.oferta,
       date: p.date != null ? p.date : f.date
     }));
@@ -2728,12 +2738,12 @@ function AdminPreReserva() {
     try {
       const rows = await sb("pre_reservas", {
         method: "POST",
-        body: JSON.stringify({ nombre: form.name.trim(), telefono: form.phone.trim() || null, personas: people, oferta: form.oferta, fecha: form.date })
+        body: JSON.stringify({ nombre: form.name.trim(), telefono: form.phone.trim() || null, personas: people, oferta: form.oferta, fecha: form.date, notas: form.notas.trim() || null })
       });
       if (rows && rows[0]) setList((prev) => [...prev, rows[0]].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))));
       else await load();
       setMsg(`\u2713 Pre reserva guardada: ${form.name.trim()} \xB7 ${people} personas \xB7 ${formatDateEs(form.date)}`);
-      setForm({ name: "", phone: "", partySize: "", oferta: "", date: form.date });
+      setForm({ name: "", phone: "", partySize: "", notas: "", oferta: "", date: form.date });
     } catch (err) {
       console.error(err);
       setMsg("\u26A0\uFE0F No se pudo guardar. \xBFFalta ejecutar pre_reservas.sql en Supabase?");
@@ -2756,15 +2766,24 @@ function AdminPreReserva() {
   const today = todayISO();
   const upcoming = list.filter((r) => r.fecha >= today);
   const past = list.filter((r) => r.fecha < today).reverse().slice(0, 30);
-  const row = (r) => /* @__PURE__ */ React.createElement("div", { key: r.id, "data-testid": "pre-row", style: { ...styles.reservedBlock, marginTop: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" } }, /* @__PURE__ */ React.createElement("b", null, r.nombre), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, formatDateEs(r.fecha))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.panelMeta, display: "flex", gap: 10, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", null, "\u{1F465} ", r.personas), /* @__PURE__ */ React.createElement("span", null, "\u{1F37D} ", PRE_OFFER_LABELS[r.oferta] || r.oferta), r.telefono && /* @__PURE__ */ React.createElement("a", { href: `tel:${r.telefono}`, style: { color: "#C9A15A" } }, "\u{1F4DE} ", r.telefono)), /* @__PURE__ */ React.createElement("div", null, confirmDel === r.id ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xBFBorrar?"), /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => handleDelete(r.id) }, "S\xED, borrar"), /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => setConfirmDel(null) }, "No")) : /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => setConfirmDel(r.id) }, "\u{1F5D1} Borrar")));
+  const row = (r) => /* @__PURE__ */ React.createElement("div", { key: r.id, "data-testid": "pre-row", style: { ...styles.reservedBlock, marginTop: 10, display: "flex", flexDirection: "column", gap: 4 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" } }, /* @__PURE__ */ React.createElement("b", null, r.nombre), /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, formatDateEs(r.fecha))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.panelMeta, display: "flex", gap: 10, flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", null, "\u{1F465} ", r.personas), /* @__PURE__ */ React.createElement("span", null, "\u{1F37D} ", PRE_OFFER_LABELS[r.oferta] || r.oferta), r.telefono && /* @__PURE__ */ React.createElement("a", { href: `tel:${r.telefono}`, style: { color: "#C9A15A" } }, "\u{1F4DE} ", r.telefono)), r.notas && /* @__PURE__ */ React.createElement("div", { "data-testid": "pre-nota", style: { fontSize: 13, color: "#D8D2C6", whiteSpace: "pre-wrap", background: "#1A1815", borderRadius: 6, padding: "6px 8px" } }, "\u{1F4DD} ", r.notas), /* @__PURE__ */ React.createElement("div", null, confirmDel === r.id ? /* @__PURE__ */ React.createElement("span", { style: { display: "inline-flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: styles.panelMeta }, "\xBFBorrar?"), /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => handleDelete(r.id) }, "S\xED, borrar"), /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => setConfirmDel(null) }, "No")) : /* @__PURE__ */ React.createElement("button", { type: "button", style: { ...styles.editBtn, padding: "4px 10px" }, onClick: () => setConfirmDel(r.id) }, "\u{1F5D1} Borrar")));
   return /* @__PURE__ */ React.createElement("div", { style: { ...styles.mainCentered, flexDirection: "column", alignItems: "center", gap: 20, width: "100%", boxSizing: "border-box" } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.formCard, width: "100%", maxWidth: 560, boxSizing: "border-box" } }, /* @__PURE__ */ React.createElement("h1", { style: styles.formTitle }, "Pre Reserva"), /* @__PURE__ */ React.createElement("p", { style: styles.formSubtitle }, "Apunta r\xE1pido a quien quiere reservar y qu\xE9 se le ha ofrecido. Puedes rellenarlo hablando."), /* @__PURE__ */ React.createElement(
     VoiceDictation,
     {
       onText: handleVoice,
-      placeholder: "O escribe / dicta: Juan P\xE9rez, 600123456, 4 personas, men\xFA, el viernes",
-      failMsg: "\u26A0\uFE0F No he entendido nada \xFAtil. Prueba: \xABJuan P\xE9rez, tel\xE9fono 600 123 456, 4 personas, le hemos ofrecido el men\xFA, para el viernes\xBB."
+      placeholder: "O escribe / dicta: Juan P\xE9rez, 600123456, 4 personas, men\xFA, el viernes, nota: \u2026",
+      failMsg: "\u26A0\uFE0F No he entendido nada \xFAtil. Prueba: \xABJuan P\xE9rez, tel\xE9fono 600 123 456, 4 personas, le hemos ofrecido el men\xFA, para el viernes, nota: dudan entre sala y terraza\xBB."
     }
-  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-name", style: styles.input, value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "\xBFA nombre de qui\xE9n?" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-phone", type: "tel", style: styles.input, value: form.phone, onChange: (e) => setForm({ ...form, phone: e.target.value }), placeholder: "Opcional" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F465}"), "N\xFAmero de personas"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-people", type: "number", min: 1, style: styles.input, value: form.partySize, onChange: (e) => setForm({ ...form, partySize: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Se le ha ofrecido"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, Object.entries(PRE_OFFER_LABELS).map(([k, label]) => /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Nombre"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-name", style: styles.input, value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "\xBFA nombre de qui\xE9n?" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Tel\xE9fono"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-phone", type: "tel", style: styles.input, value: form.phone, onChange: (e) => setForm({ ...form, phone: e.target.value }), placeholder: "Opcional" }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, /* @__PURE__ */ React.createElement("span", { style: { marginRight: 6 } }, "\u{1F465}"), "N\xFAmero de personas"), /* @__PURE__ */ React.createElement("input", { "data-testid": "pre-people", type: "number", min: 1, style: styles.input, value: form.partySize, onChange: (e) => setForm({ ...form, partySize: e.target.value }) }), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Notas"), /* @__PURE__ */ React.createElement(
+    "textarea",
+    {
+      "data-testid": "pre-notas",
+      style: { ...styles.input, minHeight: 84, resize: "vertical", fontFamily: "inherit" },
+      value: form.notas,
+      onChange: (e) => setForm({ ...form, notas: e.target.value }),
+      placeholder: "Lo que quieras apuntar: dudas con el men\xFA 2 o 3, no saben si Sala o Terraza\u2026"
+    }
+  ), /* @__PURE__ */ React.createElement("label", { style: styles.label }, "Se le ha ofrecido"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, Object.entries(PRE_OFFER_LABELS).map(([k, label]) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: k,
