@@ -1,4 +1,4 @@
-const CACHE_NAME = "taracea-interna-v2";
+const CACHE_NAME = "taracea-publica-v3";
 const urlsToCache = ["./", "./index.html"];
 
 self.addEventListener("install", (event) => {
@@ -19,6 +19,9 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  // Para el documento HTML principal, vamos siempre primero a la red
+  // (así los cambios que subas se ven al momento) y solo usamos la
+  // caché si no hay conexión.
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
